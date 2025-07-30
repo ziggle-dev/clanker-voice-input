@@ -1,0 +1,53 @@
+{
+  "name": "clanker-voice-input",
+  "version": "1.0.0",
+  "description": "Voice input tool for Clanker that captures audio from the microphone and converts it to text using Grok's speech-to-text API",
+  "main": "dist/index.js",
+  "bin": {
+    "clanker-voice-input": "./dist/index.js"
+  },
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "clanker",
+    "tool",
+    "voice",
+    "speech-to-text",
+    "microphone",
+    "grok",
+    "audio"
+  ],
+  "author": "James",
+  "license": "MIT",
+  "dependencies": {
+    "node-record-lpcm16": "^1.0.1",
+    "sox-stream": "^2.0.6",
+    "openai": "^4.52.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/james/clanker-voice-input.git"
+  },
+  "bugs": {
+    "url": "https://github.com/james/clanker-voice-input/issues"
+  },
+  "homepage": "https://github.com/james/clanker-voice-input#readme"
+}
