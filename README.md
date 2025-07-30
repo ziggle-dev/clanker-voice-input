@@ -1,15 +1,16 @@
 # Clanker Voice Input Tool
 
-A voice input tool for Clanker that captures audio from the system microphone and converts it to text using Grok's speech-to-text API.
+A flexible input abstraction tool for Clanker that supports both voice (via microphone) and text input modes. This tool provides a unified interface for getting user input, configurable via `~/.clanker/settings.json`.
 
 ## Features
 
-- 🎤 Capture voice input from system microphone
-- 🔤 Convert speech to text using Grok's Whisper model
-- 🌍 Support for multiple languages
-- 🔁 Continuous listening mode for hands-free operation
-- ⏱️ Configurable recording duration
-- 🎯 Optional prompts to guide speech recognition
+- 🎤 **Voice Input**: Capture audio from system microphone with speech-to-text
+- ⌨️ **Text Input**: Use system dialogs for text input (via ziggle-dev/input tool)
+- 🔄 **Mode Switching**: Easily switch between voice and text modes
+- ⚙️ **Configurable**: Set default behavior in ~/.clanker/settings.json
+- 🌍 **Multi-language**: Support for multiple languages in voice mode
+- 🔁 **Continuous Mode**: Hands-free continuous voice listening
+- 🔌 **Clanker Integration**: Uses core Clanker API for speech processing
 
 ## Installation
 
@@ -19,131 +20,172 @@ npm install clanker-voice-input
 
 ### Prerequisites
 
-1. **SoX** - Sound eXchange utility for audio recording
-   ```bash
-   # macOS
-   brew install sox
+#### For Voice Mode
 
-   # Ubuntu/Debian
-   sudo apt-get install sox
+**SoX** - Sound eXchange utility for audio recording
 
-   # Windows (via Chocolatey)
-   choco install sox
-   ```
+```bash
+# macOS
+brew install sox
 
-2. **Grok API Key** - Get your API key from [x.ai](https://x.ai)
+# Ubuntu/Debian
+sudo apt-get install sox
+
+# Windows
+# Option 1: Using Chocolatey
+choco install sox
+
+# Option 2: Manual installation
+# Download from http://sox.sourceforge.net
+# Add to PATH environment variable
+```
+
+#### For All Modes
+
+**Clanker Configuration** - Must have Clanker configured with an API key in `~/.clanker/settings.json`
+
+## Configuration
+
+Configure default behavior in `~/.clanker/settings.json`:
+
+```json
+{
+  "apiKey": "your-api-key",
+  "provider": "grok",
+  "input": {
+    "mode": "voice",  // Default mode: "voice" or "text"
+    "voiceSettings": {
+      "duration": 5,      // Default recording duration
+      "language": "en-US" // Default language
+    }
+  }
+}
+```
 
 ## Usage
 
-### Basic Voice Input (5 seconds)
+### Basic Usage (Uses Default Mode)
 
 ```bash
-clanker voice-input
+clanker-voice-input
 ```
 
-### Custom Duration
+### Text Input Mode
 
 ```bash
-clanker voice-input --duration 10
+clanker-voice-input --mode text
 ```
 
-### With Language Specification
+### Voice Input with Custom Duration
 
 ```bash
-clanker voice-input --language es-ES --duration 8
+clanker-voice-input --mode voice --duration 10
 ```
 
-### Continuous Listening Mode
+### Continuous Voice Mode
 
 ```bash
-clanker voice-input --continuous --prompt "Listening for commands"
+clanker-voice-input --continuous
 ```
 
-### With API Key
+### With Custom Prompt
 
 ```bash
-clanker voice-input --grokApiKey YOUR_API_KEY
-```
-
-Or set via environment variable:
-
-```bash
-export GROK_API_KEY=YOUR_API_KEY
-clanker voice-input
+clanker-voice-input --prompt "What's your command?"
 ```
 
 ## Arguments
 
 | Argument | Type | Required | Default | Description |
 |----------|------|----------|---------|-------------|
-| duration | number | No | 5 | Recording duration in seconds (max: 30) |
-| language | string | No | en-US | Language code for speech recognition |
-| prompt | string | No | - | Optional prompt to guide speech recognition |
-| grokApiKey | string | No | - | Grok API key (or use GROK_API_KEY env var) |
-| continuous | boolean | No | false | Enable continuous listening mode |
-
-## Examples
-
-### Voice Command Input
-```bash
-# Capture a voice command
-clanker voice-input --duration 3 --prompt "User command"
-```
-
-### Dictation Mode
-```bash
-# Longer recording for dictation
-clanker voice-input --duration 20 --prompt "Dictating a message"
-```
-
-### Multi-language Support
-```bash
-# Spanish voice input
-clanker voice-input --language es-ES
-
-# French voice input
-clanker voice-input --language fr-FR
-
-# Japanese voice input
-clanker voice-input --language ja-JP
-```
-
-### Continuous Mode for Interactive Sessions
-```bash
-# Start continuous listening (press Ctrl+C to stop)
-clanker voice-input --continuous --prompt "Waiting for next command"
-```
+| duration | number | No | 5 (or from settings) | Recording duration in seconds (max: 30) |
+| language | string | No | en-US (or from settings) | Language code for speech recognition |
+| prompt | string | No | - | Optional prompt to guide input |
+| mode | string | No | From settings or 'voice' | Input mode: voice, text, or auto |
+| continuous | boolean | No | false | Enable continuous listening (voice only) |
 
 ## Output Format
 
-### Single Recording Mode
+### Voice Mode (Single)
 ```json
 {
   "success": true,
-  "mode": "single",
+  "mode": "voice",
   "transcription": "Hello, this is my voice input",
   "duration": 5,
   "language": "en-US"
 }
 ```
 
-### Continuous Mode
+### Text Mode
 ```json
 {
   "success": true,
-  "mode": "continuous",
-  "transcriptions": [
-    "First voice input",
-    "Second voice input",
-    "Third voice input"
-  ],
-  "count": 3
+  "mode": "text",
+  "input": "User typed text"
 }
+```
+
+### Continuous Voice Mode
+```json
+{
+  "success": true,
+  "mode": "continuous-voice",
+  "transcriptions": [
+    "First voice command",
+    "Second voice command"
+  ],
+  "count": 2
+}
+```
+
+## Examples
+
+### Interactive Command Input
+```bash
+# Voice command
+clanker-voice-input --mode voice --duration 3 --prompt "Say your command"
+
+# Text command
+clanker-voice-input --mode text --prompt "Enter your command"
+```
+
+### Multi-language Voice Input
+```bash
+# Spanish
+clanker-voice-input --language es-ES
+
+# French
+clanker-voice-input --language fr-FR
+
+# Japanese
+clanker-voice-input --language ja-JP
+```
+
+### Script Integration
+```javascript
+const { exec } = require('child_process');
+
+// Get voice input
+exec('clanker-voice-input --mode voice', (error, stdout) => {
+  const result = JSON.parse(stdout);
+  if (result.success) {
+    console.log('User said:', result.transcription);
+  }
+});
+
+// Get text input
+exec('clanker-voice-input --mode text --prompt "Enter your name"', (error, stdout) => {
+  const result = JSON.parse(stdout);
+  if (result.success) {
+    console.log('User entered:', result.input);
+  }
+});
 ```
 
 ## Language Codes
 
-Common language codes supported:
+Common language codes for voice input:
 - `en-US` - English (US)
 - `en-GB` - English (UK)
 - `es-ES` - Spanish (Spain)
@@ -159,29 +201,44 @@ Common language codes supported:
 ## Troubleshooting
 
 ### "SoX is required" Error
-Make sure SoX is installed on your system. See Prerequisites section.
+Install SoX for your platform (see Prerequisites).
 
-### "Recording error" 
-- Check microphone permissions
-- Ensure microphone is not being used by another application
-- Try adjusting system audio input settings
+### "No API key found" Error
+Configure Clanker with your API key:
+```bash
+clanker --configure
+```
 
-### "Transcription error"
-- Verify your Grok API key is valid
-- Check your internet connection
-- Ensure the audio quality is sufficient (quiet environment)
+### Windows Audio Issues
+- Ensure SoX is in your PATH
+- Try running as administrator
+- Check Windows audio permissions
 
-### Poor Recognition Quality
-- Speak clearly and at a moderate pace
+### Poor Voice Recognition
+- Speak clearly at moderate pace
 - Reduce background noise
-- Use the `prompt` parameter to provide context
-- Try a different language code if applicable
+- Use the `prompt` parameter for context
+- Try different language codes
 
-## Security Notes
+### Text Input Not Working
+Ensure the ziggle-dev/input tool is accessible:
+```bash
+clanker tools install ziggle-dev/input
+```
 
-- API keys should be stored securely, preferably as environment variables
-- Audio is processed locally and sent to Grok's API for transcription
-- No audio is stored permanently by this tool
+## How It Works
+
+1. **Voice Mode**: Records audio using SoX, sends to Clanker API for transcription
+2. **Text Mode**: Delegates to ziggle-dev/input tool for system dialogs
+3. **Settings**: Reads ~/.clanker/settings.json for defaults and API configuration
+4. **API Integration**: Uses the same API endpoint as configured in Clanker
+
+## Security
+
+- Audio is processed locally and sent only to your configured API
+- No audio is stored permanently
+- API credentials are read from Clanker's secure configuration
+- Text input uses system-native secure dialogs
 
 ## Contributing
 
