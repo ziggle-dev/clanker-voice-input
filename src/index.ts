@@ -7,6 +7,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import { parseArgs } from 'util';
+import { fileURLToPath } from 'url';
 
 const execAsync = promisify(exec);
 
@@ -175,12 +176,14 @@ async function recordVoice(duration: number, language: string, prompt?: string):
 
 async function getTextInput(prompt?: string): Promise<string> {
   try {
-    // Use the ziggle-dev/input tool
+    // Use the clanker tools command to run input tool
     const { execSync } = await import('child_process');
-    const result = execSync(
-      `clanker input --prompt "${prompt || 'Please enter your input:'}" --title "Clanker Input"`,
-      { encoding: 'utf-8' }
-    );
+    
+    // Build the command with proper escaping
+    const promptArg = prompt ? `--prompt "${prompt.replace(/"/g, '\\"')}"` : '';
+    const command = `clanker tools run ziggle-dev/input ${promptArg}`;
+    
+    const result = execSync(command, { encoding: 'utf-8' });
     
     // Parse the JSON output from the input tool
     const parsed = JSON.parse(result);
@@ -367,7 +370,7 @@ Examples:
 }
 
 // Run if called directly
-if (require.main === module) {
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
   main();
 }
 
