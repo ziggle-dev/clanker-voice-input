@@ -8,7 +8,7 @@
  * Configurable via ~/.clanker/settings.json
  */
 
-import { createTool, ToolCategory, ToolCapability, ToolContext, ToolArguments } from '@ziggler/clanker/dist/exports.js';
+import { createTool, ToolCategory, ToolCapability, ToolContext, ToolArguments } from '@ziggler/clanker';
 import record from 'node-record-lpcm16';
 import { exec } from 'child_process';
 import { promisify } from 'util';
