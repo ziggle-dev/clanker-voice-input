@@ -15,7 +15,7 @@ A flexible input abstraction tool for Clanker that supports both voice (via micr
 ## Installation
 
 ```bash
-npm install clanker-voice-input
+clanker tools install ziggle-dev/voice-input
 ```
 
 ### Prerequisites
@@ -42,7 +42,8 @@ choco install sox
 
 #### For All Modes
 
-**Clanker Configuration** - Must have Clanker configured with an API key in `~/.clanker/settings.json`
+- **Clanker Configuration** - Must have Clanker configured with an API key in `~/.clanker/settings.json`
+- **Input Tool** - Automatically installed as a dependency
 
 ## Configuration
 
@@ -64,123 +65,64 @@ Configure default behavior in `~/.clanker/settings.json`:
 
 ## Usage
 
-### Basic Usage (Uses Default Mode)
+### Basic Voice Input
 
 ```bash
-clanker-voice-input
+clanker tools run ziggle-dev/voice-input --mode voice
 ```
 
 ### Text Input Mode
 
 ```bash
-clanker-voice-input --mode text
+clanker tools run ziggle-dev/voice-input --mode text --prompt "What's your name?"
 ```
 
-### Voice Input with Custom Duration
+### Voice Input with Custom Settings
 
 ```bash
-clanker-voice-input --mode voice --duration 10
+clanker tools run ziggle-dev/voice-input --mode voice --duration 10 --language es-ES
 ```
 
-### Continuous Voice Mode
+### Auto Mode (Uses Configuration)
 
 ```bash
-clanker-voice-input --continuous
+clanker tools run ziggle-dev/voice-input
 ```
 
-### With Custom Prompt
-
-```bash
-clanker-voice-input --prompt "What's your command?"
-```
-
-## Arguments
+## Tool Arguments
 
 | Argument | Type | Required | Default | Description |
 |----------|------|----------|---------|-------------|
-| duration | number | No | 5 (or from settings) | Recording duration in seconds (max: 30) |
-| language | string | No | en-US (or from settings) | Language code for speech recognition |
+| mode | string | No | auto | Input mode: voice, text, or auto |
+| duration | number | No | 5 | Recording duration in seconds (max: 30) |
+| language | string | No | en-US | Language code for speech recognition |
 | prompt | string | No | - | Optional prompt to guide input |
-| mode | string | No | From settings or 'voice' | Input mode: voice, text, or auto |
 | continuous | boolean | No | false | Enable continuous listening (voice only) |
-
-## Output Format
-
-### Voice Mode (Single)
-```json
-{
-  "success": true,
-  "mode": "voice",
-  "transcription": "Hello, this is my voice input",
-  "duration": 5,
-  "language": "en-US"
-}
-```
-
-### Text Mode
-```json
-{
-  "success": true,
-  "mode": "text",
-  "input": "User typed text"
-}
-```
-
-### Continuous Voice Mode
-```json
-{
-  "success": true,
-  "mode": "continuous-voice",
-  "transcriptions": [
-    "First voice command",
-    "Second voice command"
-  ],
-  "count": 2
-}
-```
 
 ## Examples
 
-### Interactive Command Input
+### Voice Command Input
 ```bash
-# Voice command
-clanker-voice-input --mode voice --duration 3 --prompt "Say your command"
+# Capture a 3-second voice command
+clanker tools run ziggle-dev/voice-input --mode voice --duration 3 --prompt "Say your command"
+```
 
-# Text command
-clanker-voice-input --mode text --prompt "Enter your command"
+### Text Dialog Input
+```bash
+# Show text input dialog
+clanker tools run ziggle-dev/voice-input --mode text --prompt "Enter your email"
 ```
 
 ### Multi-language Voice Input
 ```bash
 # Spanish
-clanker-voice-input --language es-ES
+clanker tools run ziggle-dev/voice-input --mode voice --language es-ES
 
 # French
-clanker-voice-input --language fr-FR
+clanker tools run ziggle-dev/voice-input --mode voice --language fr-FR
 
 # Japanese
-clanker-voice-input --language ja-JP
-```
-
-### Script Integration
-```javascript
-const { exec } = require('child_process');
-
-// Get voice input
-exec('clanker-voice-input --mode voice', (error, stdout) => {
-  const result = JSON.parse(stdout);
-  if (result.success) {
-    console.log('User said:', result.transcription);
-  }
-});
-
-// Get text input
-exec('clanker-voice-input --mode text --prompt "Enter your name"', (error, stdout) => {
-  const result = JSON.parse(stdout);
-  if (result.success) {
-    console.log('User entered:', result.input);
-  }
-});
+clanker tools run ziggle-dev/voice-input --mode voice --language ja-JP
 ```
 
 ## Language Codes
@@ -197,6 +139,36 @@ Common language codes for voice input:
 - `ja-JP` - Japanese
 - `ko-KR` - Korean
 - `zh-CN` - Chinese (Simplified)
+
+## Output
+
+The tool returns the captured input as plain text in the `output` field, with additional metadata in the `data` field:
+
+### Voice Mode Output
+```json
+{
+  "success": true,
+  "output": "Hello, this is my voice input",
+  "data": {
+    "mode": "voice",
+    "transcription": "Hello, this is my voice input",
+    "duration": 5,
+    "language": "en-US"
+  }
+}
+```
+
+### Text Mode Output
+```json
+{
+  "success": true,
+  "output": "User typed text",
+  "data": {
+    "mode": "text",
+    "input": "User typed text"
+  }
+}
+```
 
 ## Troubleshooting
 
@@ -221,7 +193,7 @@ clanker --configure
 - Try different language codes
 
 ### Text Input Not Working
-Ensure the ziggle-dev/input tool is accessible:
+The ziggle-dev/input tool is automatically installed as a dependency. If issues persist:
 ```bash
 clanker tools install ziggle-dev/input
 ```

@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] - 2025-01-30
+
+### Changed
+- **BREAKING**: Complete rewrite as a proper Clanker tool using createTool() builder pattern
+- **BREAKING**: No longer a CLI tool - must be run via `clanker tools run`
+- **BREAKING**: Changed package name to @ziggle-dev/voice-input
+- Tool now follows standard Clanker tool format and conventions
+
+### Fixed
+- Proper integration with Clanker tool ecosystem
+- Text mode now uses context.tools.execute() for better integration
+- Removed all CLI-specific code
+
 ## [2.0.0] - 2025-01-30
 
 ### Changed

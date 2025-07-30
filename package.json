@@ -1,30 +1,48 @@
 {
-  "name": "clanker-voice-input",
-  "version": "2.0.0",
+  "name": "@ziggle-dev/voice-input",
+  "version": "3.0.0",
   "description": "Flexible input abstraction tool for Clanker supporting both voice (microphone) and text input modes",
-  "main": "dist/index.js",
-  "bin": {
-    "clanker-voice-input": "./dist/index.js"
-  },
-  "types": "dist/index.d.ts",
   "type": "module",
+  "main": "src/index.ts",
+  "author": {
+    "name": "James",
+    "email": "james@example.com",
+    "github": "ziggle-dev"
+  },
+  "repository": "https://github.com/ziggle-dev/clanker-voice-input",
+  "license": "MIT",
+  "clanker": {
+    "category": "Utility",
+    "capabilities": [
+      "SystemExecute",
+      "NetworkAccess"
+    ],
+    "tags": [
+      "voice",
+      "input",
+      "audio",
+      "speech",
+      "microphone",
+      "text",
+      "dialog",
+      "transcription"
+    ],
+    "minVersion": "0.1.34",
+    "dependencies": {
+      "ziggle-dev/input": ">=1.0.0"
+    }
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
     "test": "./test.sh",
-    "prepublishOnly": "npm run build"
+    "lint": "eslint src --ext .ts"
   },
-  "keywords": [
-    "clanker",
-    "tool",
-    "voice",
-    "speech-to-text",
-    "microphone",
-    "grok",
-    "audio"
-  ],
-  "author": "James",
-  "license": "MIT",
+  "peerDependencies": {
+    "@ziggler/clanker": "*",
+    "ink": "*",
+    "react": "*"
+  },
   "dependencies": {
     "node-record-lpcm16": "^1.0.1",
     "sox-stream": "^2.0.6",
@@ -34,23 +52,32 @@
   "devDependencies": {
     "@types/node": "^20.0.0",
     "@types/node-fetch": "^2.6.11",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "@ziggler/clanker": "^0.1.34",
+    "eslint": "^8.0.0",
+    "ink": "^6.0.1",
+    "react": "^19.1.0",
     "typescript": "^5.0.0"
   },
+  "keywords": [
+    "clanker",
+    "tool",
+    "voice",
+    "speech-to-text",
+    "microphone",
+    "audio",
+    "input",
+    "text",
+    "dialog"
+  ],
   "files": [
-    "dist",
+    "src",
     "README.md",
     "LICENSE",
-    "package.json"
+    "CHANGELOG.md"
   ],
   "engines": {
     "node": ">=18.0.0"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/james/clanker-voice-input.git"
-  },
-  "bugs": {
-    "url": "https://github.com/james/clanker-voice-input/issues"
-  },
-  "homepage": "https://github.com/james/clanker-voice-input#readme"
+  }
 }
