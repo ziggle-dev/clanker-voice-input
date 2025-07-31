@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.0] - 2025-07-31
+
+### Added
+- **Always-On Voice Assistant**: Integrated voice assistant with wake word detection
+- **Wake Words**: "Hey Jarvis" and "Hey Clanker" activate the assistant
+- **Background Daemon**: Auto-starts when configured in settings
+- **Daemon Commands**: Control the assistant with --daemon start/stop/status/ask
+- **AI Communication**: AI can ask user questions via the ask command
+- **User Preferences**: Configurable user title (default: "sir")
+- **Desktop Notifications**: Visual feedback for all voice interactions
+
+### Changed
+- Tool now auto-starts voice assistant daemon if enabled in settings
+- Added comprehensive voice assistant configuration in ~/.clanker/settings.json
+
 ## [3.0.0] - 2025-01-30
 
 ### Changed

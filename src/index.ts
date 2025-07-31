@@ -15,6 +15,7 @@ import { promisify } from 'util';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
+import { VoiceAssistantDaemon, VoiceAssistantSettings, defaultAssistantSettings } from './voice-assistant-daemon.js';
 
 const execAsync = promisify(exec);
 
@@ -31,6 +32,7 @@ interface ClankerSettings {
   apiKey?: string;
   provider?: string;
   customBaseURL?: string;
+  voiceAssistant?: VoiceAssistantSettings;
 }
 
 async function loadClankerSettings(): Promise<ClankerSettings> {
@@ -54,7 +56,7 @@ async function checkSoxInstalled(): Promise<void> {
   }
 }
 
-async function callClankerAPI(audioBuffer: Buffer, language: string, prompt?: string): Promise<string> {
+export async function callClankerAPI(audioBuffer: Buffer, language: string, prompt?: string): Promise<string> {
   // Load settings to get API configuration
   const settings = await loadClankerSettings();
   
@@ -162,9 +164,24 @@ async function recordVoice(duration: number, language: string, prompt?: string, 
 }
 
 async function getTextInput(prompt?: string, context?: ToolContext): Promise<string> {
-  // For now, we'll use a simple fallback since tools execution from within tools
-  // is not directly supported in the current context structure
-  throw new Error('Text input mode is currently not available. Please use voice mode or install the input tool separately.');
+  if (!context?.registry) {
+    throw new Error('Text input mode requires tool registry context');
+  }
+
+  try {
+    const result = await context.registry.execute('input', {
+      prompt: prompt || 'Please enter your input:',
+      type: 'text'
+    });
+
+    if (result.success && result.output) {
+      return result.output;
+    } else {
+      throw new Error(result.error || 'Failed to get input');
+    }
+  } catch (error: any) {
+    throw new Error(`Text input error: ${error.message}`);
+  }
 }
 
 /**
@@ -244,12 +261,86 @@ export default createTool()
     }
   ])
 
+  // Add daemon control commands
+  .stringArg('daemon', 'Control voice assistant daemon: start, stop, status, ask', {
+    required: false,
+    enum: ['start', 'stop', 'status', 'ask']
+  })
+  .stringArg('message', 'Message for ask command', {
+    required: false
+  })
+
   // Execute
   .execute(async (args: ToolArguments, context: ToolContext) => {
-    const { duration = 5, language = 'en-US', prompt, mode = 'auto', continuous = false } = args;
+    const { duration = 5, language = 'en-US', prompt, mode = 'auto', continuous = false, daemon, message } = args;
 
-    // Load settings
+    // Load settings once at the beginning
     const settings = await loadClankerSettings();
+    const assistantSettings = {
+      ...defaultAssistantSettings,
+      ...settings.voiceAssistant
+    };
+
+    // Auto-start daemon if configured (since we don't have onInitialize)
+    // Only auto-start if enabled, autoStart is true, and we're not running a daemon command
+    if (!daemon && assistantSettings.enabled && assistantSettings.autoStart) {
+      const isRunning = await VoiceAssistantDaemon.isRunning();
+      if (!isRunning) {
+        context.logger?.info('Starting voice assistant daemon...');
+        const daemonInstance = new VoiceAssistantDaemon(assistantSettings);
+        await daemonInstance.startDaemon();
+      }
+    }
+
+    // Handle daemon control commands
+    if (daemon) {
+      const daemonInstance = new VoiceAssistantDaemon(assistantSettings);
+
+      switch (daemon) {
+        case 'start':
+          await daemonInstance.startDaemon();
+          return {
+            success: true,
+            output: 'Voice assistant daemon started'
+          };
+
+        case 'stop':
+          await daemonInstance.stopDaemon();
+          return {
+            success: true,
+            output: 'Voice assistant daemon stopped'
+          };
+
+        case 'status':
+          const isRunning = await VoiceAssistantDaemon.isRunning();
+          return {
+            success: true,
+            output: isRunning ? 'Voice assistant daemon is running' : 'Voice assistant daemon is not running',
+            data: { running: isRunning }
+          };
+
+        case 'ask':
+          if (!message) {
+            return {
+              success: false,
+              error: 'Message required for ask command'
+            };
+          }
+          await daemonInstance.askUser(message as string);
+          return {
+            success: true,
+            output: `Asked user: ${message}`
+          };
+
+        default:
+          return {
+            success: false,
+            error: `Unknown daemon command: ${daemon}`
+          };
+      }
+    }
+
+    // Use settings loaded at the beginning
     const inputConfig = settings.input || { mode: 'voice' };
 
     // Determine input mode

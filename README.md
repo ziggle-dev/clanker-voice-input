@@ -59,6 +59,18 @@ Configure default behavior in `~/.clanker/settings.json`:
       "duration": 5,      // Default recording duration
       "language": "en-US" // Default language
     }
+  },
+  "voiceAssistant": {
+    "enabled": true,           // Enable always-on voice assistant
+    "wakeWords": [            // Wake words to activate
+      "hey jarvis",
+      "hey clanker"
+    ],
+    "userTitle": "sir",       // How the AI addresses you
+    "sensitivity": 0.5,       // Wake word detection sensitivity (0.0-1.0)
+    "autoStart": true,        // Auto-start daemon when tool is used
+    "notificationsEnabled": true,  // Desktop notifications
+    "language": "en-US"       // Language for speech recognition
   }
 }
 ```
@@ -98,6 +110,52 @@ clanker tools run ziggle-dev/voice-input
 | language | string | No | en-US | Language code for speech recognition |
 | prompt | string | No | - | Optional prompt to guide input |
 | continuous | boolean | No | false | Enable continuous listening (voice only) |
+| daemon | string | No | - | Control voice assistant: start, stop, status, ask |
+| message | string | No | - | Message for ask command |
+
+## Always-On Voice Assistant
+
+When enabled in settings, the voice input tool includes an always-on voice assistant that listens for wake words and executes commands hands-free.
+
+### Voice Assistant Commands
+
+#### Start the Assistant
+```bash
+clanker tools run voice_input --daemon start
+```
+
+#### Stop the Assistant
+```bash
+clanker tools run voice_input --daemon stop
+```
+
+#### Check Status
+```bash
+clanker tools run voice_input --daemon status
+```
+
+#### AI Can Ask You Questions
+```bash
+# The AI can use this to communicate with you
+clanker tools run voice_input --daemon ask --message "Would you like me to continue with the deployment?"
+```
+
+### How It Works
+
+1. **Auto-Start**: If enabled in settings, the voice assistant daemon starts automatically when any Clanker tool is used
+2. **Wake Words**: Say "Hey Jarvis" or "Hey Clanker" to activate
+3. **Command Processing**: After wake word detection, speak your command
+4. **Execution**: Commands are executed through Clanker CLI
+5. **Notifications**: Desktop notifications keep you informed of status
+
+### Features
+
+- 🎤 **Always Listening**: Runs continuously in background
+- 🔊 **Wake Word Detection**: Responds to "Hey Jarvis" or "Hey Clanker"
+- 💬 **Natural Commands**: Speak any Clanker command naturally
+- 🔔 **Desktop Notifications**: Visual feedback for all interactions
+- 🤖 **AI Communication**: AI can ask you questions using the ask command
+- 🎯 **Customizable**: Configure wake words, sensitivity, and user title
 
 ## Examples
 
