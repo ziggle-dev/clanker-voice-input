@@ -69,7 +69,7 @@ export class VoiceAssistantDaemon extends EventEmitter {
     }
 
     // Fork a child process to run the daemon
-    const daemonScript = path.join(__dirname, 'daemon-runner.js');
+    const daemonScript = new URL('./daemon-runner.js', import.meta.url).pathname;
     this.daemonProcess = spawn('node', [daemonScript], {
       detached: true,
       stdio: 'ignore'

@@ -24,9 +24,22 @@ async function loadSettings() {
 }
 
 async function run() {
-  console.log('Starting voice assistant daemon...');
+  // Set up logging
+  const logFile = path.join(os.homedir(), '.clanker', 'voice-assistant.log');
+  const logStream = await fs.open(logFile, 'a');
+  
+  const log = (message: string) => {
+    const timestamp = new Date().toISOString();
+    const logMessage = `[${timestamp}] ${message}\n`;
+    logStream.write(logMessage);
+    console.log(message);
+  };
+  
+  log('Starting voice assistant daemon...');
   
   const settings = await loadSettings();
+  log(`Settings loaded: ${JSON.stringify(settings)}`);
+  
   const daemon = new VoiceAssistantDaemon(settings);
 
   // Setup event handlers

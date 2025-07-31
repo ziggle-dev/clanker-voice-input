@@ -187,13 +187,16 @@ async function getTextInput(prompt?: string, context?: ToolContext): Promise<str
 /**
  * Voice Input tool - Flexible input abstraction for voice and text
  */
-export default createTool()
+// Store daemon state globally
+let daemonStarted = false;
+
+const voiceInputTool = createTool()
   .id('voice_input')
   .name('Voice Input')
   .description('Flexible input tool supporting both voice (microphone + speech-to-text) and text (system dialogs) modes. Voice mode records audio and transcribes it using Clanker\'s configured API. Text mode uses system dialogs. Configurable via ~/.clanker/settings.json.')
   .category(ToolCategory.Utility)
   .capabilities(ToolCapability.SystemExecute, ToolCapability.NetworkAccess)
-  .tags('voice', 'input', 'audio', 'speech', 'microphone', 'text', 'dialog', 'transcription')
+  .tags('voice', 'input', 'audio', 'speech', 'microphone', 'text', 'dialog', 'transcription', 'jarvis', 'assistant')
 
   // Arguments
   .numberArg('duration', 'Recording duration in seconds for voice mode (max: 30)', {
@@ -460,3 +463,6 @@ export default createTool()
     }
   })
   .build();
+
+// Export the tool directly
+export default voiceInputTool;
