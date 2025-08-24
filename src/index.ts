@@ -133,7 +133,7 @@ async function recordAudioWithSilenceDetection(
     let recordingTime = 0;
     const checkInterval = 100; // Check every 100ms
     
-    context?.logger?.info(`🔴 Recording (speak now, will stop on silence)...`);
+    context?.logger?.info(`🔴 Recording...`);
     
     // Configure recording with silence detection
     const recording = record.record({
@@ -253,7 +253,7 @@ async function transcribeAudio(
   language: string = 'en', 
   context?: ToolContext
 ): Promise<string> {
-  context?.logger?.info('Transcribing with ElevenLabs Scribe...');
+  context?.logger?.debug('Transcribing with ElevenLabs Scribe...');
   
   // Import form-data dynamically
   const FormData = (await import('form-data')).default;
@@ -307,8 +307,8 @@ async function speakText(text: string, context: ToolContext, apiKey?: string): P
       api_key: apiKey
     });
     
-    // Wait a moment after TTS completes
-    await new Promise(resolve => setTimeout(resolve, 300));
+    // Small delay after TTS (reduced for performance)
+    await new Promise(resolve => setTimeout(resolve, 50));
   } catch (error) {
     context.logger?.warn('Failed to speak via TTS:', error);
   }
@@ -336,11 +336,11 @@ export default createTool()
   })
   .numberArg('duration', 'Max recording duration in seconds (1-60)', {
     required: false,
-    default: 30
+    default: 10
   })
-  .numberArg('min_duration', 'Minimum recording duration before silence detection (1-10)', {
+  .numberArg('min_duration', 'Minimum recording duration before silence detection (0.5-5)', {
     required: false,
-    default: 1
+    default: 0.5
   })
   .stringArg('language', 'Language code for transcription (e.g., en, es, fr)', {
     required: false,
@@ -363,11 +363,11 @@ export default createTool()
   })
   .stringArg('silence_threshold', 'Volume threshold for silence detection (e.g., 1%, 2%, 5%)', {
     required: false,
-    default: '2%'
+    default: '3%'
   })
-  .stringArg('silence_duration', 'Duration of silence before stopping (e.g., 1.5, 2.0)', {
+  .stringArg('silence_duration', 'Duration of silence before stopping (e.g., 0.8, 1.0, 1.5)', {
     required: false,
-    default: '2.0'
+    default: '1.2'
   })
   
   // Examples
@@ -428,15 +428,15 @@ export default createTool()
     const { 
       action = 'record',
       prompt, 
-      duration = 30,
-      min_duration = 1,
+      duration = 10,
+      min_duration = 0.5,
       language = 'en',
       api_key,
       speak_prompt = true,
       auto_detect_silence = true,
       speak_response = false,
-      silence_threshold = '2%',
-      silence_duration = '2.0'
+      silence_threshold = '3%',
+      silence_duration = '1.2'
     } = args;
     
     // Handle control actions
@@ -490,9 +490,8 @@ export default createTool()
       };
     }
     
-    // Load settings for auto-speak
-    const settings = await loadToolSettings();
-    const shouldSpeak = speak_response || autoSpeak || settings?.autoSpeak || false;
+    // Load settings only if needed for conversation mode
+    const settings = action === 'conversation' ? await loadToolSettings() : null;
     
     try {
       // Handle conversation mode
@@ -594,11 +593,8 @@ export default createTool()
         context
       );
       
-      // Optionally speak the transcription back
-      if (shouldSpeak && context.registry) {
-        const confirmationMessage = `I heard: ${transcription}`;
-        await speakText(confirmationMessage, context, finalApiKey as string);
-      }
+      // Don't speak back the transcription - it's redundant and slows things down
+      // User already knows what they said
       
       return {
         success: true,
@@ -606,8 +602,7 @@ export default createTool()
         data: {
           transcription,
           language,
-          autoDetectedSilence: auto_detect_silence,
-          spokeFeedback: shouldSpeak
+          autoDetectedSilence: auto_detect_silence
         }
       };
       

@@ -78,7 +78,7 @@ async function recordAudioWithSilenceDetection(maxDuration, minDuration = 1, sil
     const chunks = [];
     let recordingTime = 0;
     const checkInterval = 100;
-    context?.logger?.info(`\u{1F534} Recording (speak now, will stop on silence)...`);
+    context?.logger?.info(`\u{1F534} Recording...`);
     const recording = record.record({
       sampleRate: 16e3,
       channels: 1,
@@ -163,7 +163,7 @@ async function recordAudioFixed(duration, context) {
   });
 }
 async function transcribeAudio(audioBuffer, apiKey, language = "en", context) {
-  context?.logger?.info("Transcribing with ElevenLabs Scribe...");
+  context?.logger?.debug("Transcribing with ElevenLabs Scribe...");
   const FormData = (await import("form-data")).default;
   const form = new FormData();
   form.append("file", audioBuffer, {
@@ -200,7 +200,7 @@ async function speakText(text, context, apiKey) {
       text,
       api_key: apiKey
     });
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await new Promise((resolve) => setTimeout(resolve, 50));
   } catch (error) {
     context.logger?.warn("Failed to speak via TTS:", error);
   }
@@ -213,10 +213,10 @@ var index_default = createTool().id("voice_input").name("Voice Input").descripti
   required: false
 }).numberArg("duration", "Max recording duration in seconds (1-60)", {
   required: false,
-  default: 30
-}).numberArg("min_duration", "Minimum recording duration before silence detection (1-10)", {
+  default: 10
+}).numberArg("min_duration", "Minimum recording duration before silence detection (0.5-5)", {
   required: false,
-  default: 1
+  default: 0.5
 }).stringArg("language", "Language code for transcription (e.g., en, es, fr)", {
   required: false,
   default: "en"
@@ -234,10 +234,10 @@ var index_default = createTool().id("voice_input").name("Voice Input").descripti
   default: false
 }).stringArg("silence_threshold", "Volume threshold for silence detection (e.g., 1%, 2%, 5%)", {
   required: false,
-  default: "2%"
-}).stringArg("silence_duration", "Duration of silence before stopping (e.g., 1.5, 2.0)", {
+  default: "3%"
+}).stringArg("silence_duration", "Duration of silence before stopping (e.g., 0.8, 1.0, 1.5)", {
   required: false,
-  default: "2.0"
+  default: "1.2"
 }).examples([
   {
     description: "Simple voice recording with auto-stop",
@@ -292,15 +292,15 @@ var index_default = createTool().id("voice_input").name("Voice Input").descripti
   const {
     action = "record",
     prompt,
-    duration = 30,
-    min_duration = 1,
+    duration = 10,
+    min_duration = 0.5,
     language = "en",
     api_key,
     speak_prompt = true,
     auto_detect_silence = true,
     speak_response = false,
-    silence_threshold = "2%",
-    silence_duration = "2.0"
+    silence_threshold = "3%",
+    silence_duration = "1.2"
   } = args;
   switch (action) {
     case "enable_auto_speak":
@@ -342,8 +342,7 @@ var index_default = createTool().id("voice_input").name("Voice Input").descripti
       error: "ElevenLabs API key is required. Please provide it or save it in settings."
     };
   }
-  const settings = await loadToolSettings();
-  const shouldSpeak = speak_response || autoSpeak || settings?.autoSpeak || false;
+  const settings = action === "conversation" ? await loadToolSettings() : null;
   try {
     if (action === "conversation") {
       conversationMode = true;
@@ -411,18 +410,13 @@ var index_default = createTool().id("voice_input").name("Voice Input").descripti
       language,
       context
     );
-    if (shouldSpeak && context.registry) {
-      const confirmationMessage = `I heard: ${transcription}`;
-      await speakText(confirmationMessage, context, finalApiKey);
-    }
     return {
       success: true,
       output: transcription,
       data: {
         transcription,
         language,
-        autoDetectedSilence: auto_detect_silence,
-        spokeFeedback: shouldSpeak
+        autoDetectedSilence: auto_detect_silence
       }
     };
   } catch (error) {
