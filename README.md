@@ -2,6 +2,30 @@
 
 A flexible input abstraction tool for Clanker that supports both voice (via microphone) and text input modes. This tool provides a unified interface for getting user input, configurable via `~/.clanker/settings.json`.
 
+## 🚀 Quick Start - Voice Assistant Mode
+
+To enable the always-on voice assistant that responds to "Hey Clanker":
+
+1. Add this to your `~/.clanker/settings.json`:
+```json
+{
+  "voiceAssistant": {
+    "enabled": true,
+    "autoStart": true,
+    "wakeWords": ["hey clanker", "hey jarvis"],
+    "userTitle": "sir"
+  },
+  "elevenLabsApiKey": "your-elevenlabs-api-key"
+}
+```
+
+2. Start the daemon:
+```bash
+clanker voice-input daemon start
+```
+
+Now you can say "Hey Clanker" at any time to execute commands!
+
 ## Features
 
 - 🎤 **Voice Input**: Capture audio from system microphone with speech-to-text

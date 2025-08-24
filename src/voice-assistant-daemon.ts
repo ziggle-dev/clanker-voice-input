@@ -1,5 +1,5 @@
 /**
- * Voice Assistant Daemon - Always-on background listener
+ * Voice Assistant Service - In-process background listener
  */
 
 import record from 'node-record-lpcm16';
@@ -10,7 +10,7 @@ import { promisify } from 'util';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
-import { transcribeWithElevenLabs } from './index.js';
+import { transcribeWithElevenLabs } from './elevenlabs';
 
 const execAsync = promisify(exec);
 
@@ -28,11 +28,11 @@ export interface VoiceAssistantSettings {
 }
 
 export const defaultAssistantSettings: VoiceAssistantSettings = {
-  enabled: false,
+  enabled: true,  // Enabled when tool is installed
   wakeWords: ['hey clanker', 'hey jarvis', 'clanker'],
   userTitle: 'sir',
   sensitivity: 0.5,
-  autoStart: false,  // Disabled by default to not interfere with clanker
+  autoStart: true,  // Auto-start service when Clanker runs
   notificationsEnabled: true,
   language: 'en-US',
   microphoneDevice: undefined,
@@ -40,7 +40,10 @@ export const defaultAssistantSettings: VoiceAssistantSettings = {
   wakeWordTimeout: 3000
 };
 
-export class VoiceAssistantDaemon extends EventEmitter {
+// Global singleton instance
+let globalVoiceAssistant: VoiceAssistantService | null = null;
+
+export class VoiceAssistantService extends EventEmitter {
   private settings: VoiceAssistantSettings;
   private recording: any = null;
   private isListening: boolean = false;
@@ -55,53 +58,32 @@ export class VoiceAssistantDaemon extends EventEmitter {
     this.settings = settings;
   }
 
-  static async isRunning(): Promise<boolean> {
-    try {
-      const pidFile = path.join(os.homedir(), '.clanker', 'voice-assistant.pid');
-      const pid = await fs.readFile(pidFile, 'utf-8');
-      
-      // Check if process is running
-      await execAsync(`kill -0 ${pid}`);
-      return true;
-    } catch {
-      return false;
+  static getInstance(settings: VoiceAssistantSettings): VoiceAssistantService {
+    if (!globalVoiceAssistant) {
+      globalVoiceAssistant = new VoiceAssistantService(settings);
     }
+    return globalVoiceAssistant;
   }
 
-  async startDaemon(): Promise<void> {
-    if (await VoiceAssistantDaemon.isRunning()) {
-      console.log('Voice assistant daemon already running');
+  static isRunning(): boolean {
+    // Check if any global instance is running
+    return globalVoiceAssistant !== null && globalVoiceAssistant.isListening;
+  }
+
+  async startBackgroundListener(): Promise<void> {
+    if (this.isListening) {
+      // Already listening, silently return
       return;
     }
 
-    // Fork a child process to run the daemon
-    const daemonScript = new URL('./daemon-runner.js', import.meta.url).pathname;
-    this.daemonProcess = spawn('node', [daemonScript], {
-      detached: true,
-      stdio: 'ignore'
+    // Start listening in the background within the current process
+    this.startListening().catch(error => {
+      console.error('Voice assistant background listener error:', error);
     });
-
-    // Save PID
-    const pidFile = path.join(os.homedir(), '.clanker', 'voice-assistant.pid');
-    await fs.writeFile(pidFile, this.daemonProcess.pid.toString());
-
-    this.daemonProcess.unref();
-    console.log(`Voice assistant daemon started (PID: ${this.daemonProcess.pid})`);
   }
 
-  async stopDaemon(): Promise<void> {
-    try {
-      const pidFile = path.join(os.homedir(), '.clanker', 'voice-assistant.pid');
-      const pid = await fs.readFile(pidFile, 'utf-8');
-      
-      // Kill the process
-      await execAsync(`kill ${pid}`);
-      await fs.unlink(pidFile);
-      
-      console.log('Voice assistant daemon stopped');
-    } catch (error) {
-      console.error('Failed to stop daemon:', error);
-    }
+  async stop(): Promise<void> {
+    await this.stopListening();
   }
 
   async startListening(): Promise<void> {

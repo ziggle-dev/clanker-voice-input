@@ -15,7 +15,7 @@ import { promisify } from 'util';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
-import { VoiceAssistantDaemon, VoiceAssistantSettings, defaultAssistantSettings } from './voice-assistant-daemon.js';
+import { VoiceAssistantService, VoiceAssistantSettings, defaultAssistantSettings } from './voice-assistant-daemon';
 
 const execAsync = promisify(exec);
 
@@ -85,63 +85,7 @@ async function getAvailableMicrophoneDevices(): Promise<string[]> {
   }
 }
 
-async function getElevenLabsApiKey(context?: ToolContext): Promise<string | undefined> {
-  // Try to get from context shared state first
-  if (context) {
-    const contextWithSharedState = context as any;
-    if (contextWithSharedState.sharedState) {
-      // Check for ElevenLabs API key in shared state
-      const elevenLabsKey = contextWithSharedState.sharedState.get('elevenlabs:apiKey');
-      if (elevenLabsKey && typeof elevenLabsKey === 'string') {
-        return elevenLabsKey;
-      }
-    }
-  }
-
-  // Fall back to settings file
-  const settings = await loadClankerSettings();
-  return settings.elevenLabsApiKey;
-}
-
-export async function transcribeWithElevenLabs(audioBuffer: Buffer, language: string, prompt?: string, context?: ToolContext): Promise<string> {
-  const apiKey = await getElevenLabsApiKey(context);
-  
-  if (!apiKey) {
-    throw new Error('ElevenLabs API key not found. Please configure it in ~/.clanker/settings.json');
-  }
-
-  // Create form data for ElevenLabs Scribe API
-  const FormData = (await import('form-data')).default;
-  const form = new FormData();
-  form.append('file', audioBuffer, {
-    filename: 'audio.wav',
-    contentType: 'audio/wav'
-  });
-  form.append('model_id', 'scribe_v1');
-  form.append('language_code', language.split('-')[0]); // Convert en-US to en
-  if (prompt) {
-    form.append('prompt', prompt);
-  }
-
-  // Make API request to ElevenLabs
-  const fetch = (await import('node-fetch')).default;
-  const response = await fetch('https://api.elevenlabs.io/v1/speech-to-text', {
-    method: 'POST',
-    headers: {
-      'xi-api-key': apiKey,
-      ...form.getHeaders()
-    },
-    body: form as any
-  });
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`ElevenLabs STT error: ${response.status} - ${error}`);
-  }
-
-  const result = await response.json() as { text: string };
-  return result.text;
-}
+import { transcribeWithElevenLabs } from './elevenlabs';
 
 async function recordVoice(duration: number, language: string, prompt?: string, context?: ToolContext): Promise<string> {
   // Create temporary file for audio
@@ -227,6 +171,35 @@ async function getTextInput(prompt?: string, context?: ToolContext): Promise<str
  */
 // Store daemon state globally
 let daemonStarted = false;
+
+// Auto-start background assistant on first execution
+async function ensureAssistantStarted(context: ToolContext) {
+  if (daemonStarted) return;
+  
+  try {
+    const settings = await loadClankerSettings();
+    const assistantSettings = {
+      ...defaultAssistantSettings,
+      ...settings.voiceAssistant
+    };
+    
+    if (assistantSettings.enabled && assistantSettings.autoStart) {
+      if (!VoiceAssistantService.isRunning()) {
+        const service = VoiceAssistantService.getInstance(assistantSettings);
+        await service.startBackgroundListener();
+        context.logger?.info('Voice assistant background listener started');
+        daemonStarted = true;
+      } else {
+        context.logger?.debug('Voice assistant already running');
+        daemonStarted = true;
+      }
+    }
+  } catch (error) {
+    // Log error but don't fail
+    context.logger?.debug('Failed to start voice assistant daemon:', error);
+    daemonStarted = true; // Mark as attempted to avoid retrying
+  }
+}
 
 const voiceInputTool = createTool()
   .id('voice_input')
@@ -315,6 +288,9 @@ const voiceInputTool = createTool()
   .execute(async (args: ToolArguments, context: ToolContext) => {
     const { duration = 5, language = 'en-US', prompt, mode = 'auto', continuous = false, daemon, message } = args;
 
+    // Ensure voice assistant is started on first use (backwards compatibility)
+    await ensureAssistantStarted(context);
+
     // Load settings once at the beginning
     const settings = await loadClankerSettings();
     const assistantSettings = {
@@ -322,34 +298,30 @@ const voiceInputTool = createTool()
       ...settings.voiceAssistant
     };
 
-    // Auto-start daemon only if explicitly running daemon commands
-    // Never auto-start on regular tool invocation to avoid interfering with clanker
-    // User must explicitly use "voice-input daemon start" to enable always-on mode
-
     // Handle daemon control commands
     if (daemon) {
-      const daemonInstance = new VoiceAssistantDaemon(assistantSettings);
+      const service = VoiceAssistantService.getInstance(assistantSettings);
 
       switch (daemon) {
         case 'start':
-          await daemonInstance.startDaemon();
+          await service.startBackgroundListener();
           return {
             success: true,
-            output: 'Voice assistant daemon started'
+            output: 'Voice assistant background listener started'
           };
 
         case 'stop':
-          await daemonInstance.stopDaemon();
+          await service.stop();
           return {
             success: true,
-            output: 'Voice assistant daemon stopped'
+            output: 'Voice assistant stopped'
           };
 
         case 'status':
-          const isRunning = await VoiceAssistantDaemon.isRunning();
+          const isRunning = VoiceAssistantService.isRunning();
           return {
             success: true,
-            output: isRunning ? 'Voice assistant daemon is running' : 'Voice assistant daemon is not running',
+            output: isRunning ? 'Voice assistant is running' : 'Voice assistant is not running',
             data: { running: isRunning }
           };
 
@@ -360,7 +332,7 @@ const voiceInputTool = createTool()
               error: 'Message required for ask command'
             };
           }
-          await daemonInstance.askUser(message as string);
+          await service.askUser(message as string);
           return {
             success: true,
             output: `Asked user: ${message}`
