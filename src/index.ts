@@ -1,486 +1,621 @@
 /**
- * Voice Input tool - Flexible input abstraction supporting voice and text modes
- * 
- * This tool provides a unified interface for getting user input through either:
- * - Voice: Records audio from microphone and transcribes using Clanker's API
- * - Text: Uses system dialogs via the input tool
- * 
- * Configurable via ~/.clanker/settings.json
+ * Voice Input Tool for Clanker
+ * Advanced voice recording with conversation mode and intelligent silence detection
+ * Uses ElevenLabs Scribe API for STT and integrates with ElevenLabs TTS
  */
 
 import { createTool, ToolCategory, ToolCapability, ToolContext, ToolArguments } from '@ziggler/clanker';
 import record from 'node-record-lpcm16';
-import { exec } from 'child_process';
-import { promisify } from 'util';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
-import { VoiceAssistantService, VoiceAssistantSettings, defaultAssistantSettings } from './voice-assistant-daemon';
+import { promisify } from 'util';
+import { exec } from 'child_process';
 
 const execAsync = promisify(exec);
 
-interface InputConfig {
-  mode: 'voice' | 'text';
-  voiceSettings?: {
-    duration?: number;
-    language?: string;
-  };
-}
+// Settings path (same as elevenlabs-tts)
+const settingsPath = path.join(os.homedir(), '.clanker', 'settings.json');
 
-interface ClankerSettings {
-  input?: InputConfig;
+// Conversation state
+let conversationMode = false;
+let autoSpeak = false;
+
+// Tool settings interface
+interface ToolSettings {
   apiKey?: string;
-  provider?: string;
-  customBaseURL?: string;
-  elevenLabsApiKey?: string;
-  voiceAssistant?: VoiceAssistantSettings;
+  language?: string;
+  model?: string;
+  conversationMode?: boolean;
+  autoSpeak?: boolean;
 }
 
-async function loadClankerSettings(): Promise<ClankerSettings> {
-  const settingsPath = path.join(os.homedir(), '.clanker', 'settings.json');
+/**
+ * Load tool settings from ~/.clanker/settings.json
+ */
+async function loadToolSettings(): Promise<ToolSettings | null> {
   try {
-    const content = await fs.readFile(settingsPath, 'utf-8');
-    return JSON.parse(content);
+    await fs.mkdir(path.dirname(settingsPath), { recursive: true });
+    const settingsData = await fs.readFile(settingsPath, 'utf-8');
+    const settings = JSON.parse(settingsData);
+    return settings.tools?.elevenlabs || null;
   } catch {
-    return {};
+    return null;
   }
 }
 
-async function checkSoxInstalled(): Promise<void> {
+/**
+ * Save tool settings
+ */
+async function saveToolSettings(toolSettings: ToolSettings): Promise<void> {
   try {
-    await execAsync('which sox');
-  } catch {
-    throw new Error('SoX is required for audio recording. Please install it:\n' +
-      '  macOS: brew install sox\n' +
-      '  Linux: sudo apt-get install sox\n' +
-      '  Windows: choco install sox (or download from http://sox.sourceforge.net)');
-  }
-}
-
-async function getAvailableMicrophoneDevices(): Promise<string[]> {
-  try {
-    // Try to get available recording devices using SoX
-    const { stdout } = await execAsync('sox -n -t coreaudio -d -q 2>&1 | grep "Core Audio" || true');
+    await fs.mkdir(path.dirname(settingsPath), { recursive: true });
     
-    // If that doesn't work, try platform-specific commands
-    if (!stdout) {
-      if (process.platform === 'darwin') {
-        // macOS: Use system_profiler
-        const { stdout: macDevices } = await execAsync('system_profiler SPAudioDataType | grep "Input Device" || true');
-        if (macDevices) {
-          return macDevices.split('\n').filter(line => line.trim()).map(line => line.trim());
-        }
-      } else if (process.platform === 'linux') {
-        // Linux: Use arecord
-        const { stdout: linuxDevices } = await execAsync('arecord -l 2>/dev/null | grep "card" || true');
-        if (linuxDevices) {
-          return linuxDevices.split('\n').filter(line => line.trim());
-        }
-      }
+    let settings: any = {};
+    try {
+      const existingData = await fs.readFile(settingsPath, 'utf-8');
+      settings = JSON.parse(existingData);
+    } catch {
+      // File doesn't exist yet
     }
     
-    return ['default'];
-  } catch {
-    return ['default'];
+    if (!settings.tools) {
+      settings.tools = {};
+    }
+    
+    settings.tools.elevenlabs = {
+      ...settings.tools.elevenlabs,
+      ...toolSettings
+    };
+    
+    await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2));
+  } catch (error) {
+    console.error('Failed to save settings:', error);
   }
 }
 
-import { transcribeWithElevenLabs } from './elevenlabs';
+/**
+ * Get ElevenLabs API key from settings
+ */
+async function getApiKey(context?: ToolContext): Promise<string | undefined> {
+  const settings = await loadToolSettings();
+  if (settings?.apiKey) {
+    return settings.apiKey;
+  }
+  
+  // Try to prompt for API key if we have context
+  if (context?.registry) {
+    try {
+      const result = await context.registry.execute('input', {
+        prompt: 'Please enter your ElevenLabs API key:',
+        title: 'ElevenLabs API Key Required',
+        type: 'password'
+      });
+      
+      if (result.success && result.output) {
+        // Save the API key for future use
+        await saveToolSettings({ apiKey: result.output });
+        return result.output;
+      }
+    } catch (error) {
+      context.logger?.error('Failed to prompt for API key:', error);
+    }
+  }
+  
+  return undefined;
+}
 
-async function recordVoice(duration: number, language: string, prompt?: string, context?: ToolContext): Promise<string> {
-  // Create temporary file for audio
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'voice-input-'));
-  const audioFile = path.join(tempDir, 'recording.wav');
+/**
+ * Check if SoX is installed
+ */
+async function checkSoxInstalled(): Promise<boolean> {
+  try {
+    await execAsync('which sox');
+    return true;
+  } catch {
+    return false;
+  }
+}
 
+/**
+ * Record audio with intelligent silence detection
+ * Automatically stops when user stops speaking
+ */
+async function recordAudioWithSilenceDetection(
+  maxDuration: number, 
+  minDuration: number = 1,
+  silenceThreshold: string = '2%',
+  silenceDuration: string = '2.0',
+  context?: ToolContext
+): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    // Set up recording
+    const chunks: Buffer[] = [];
+    let recordingTime = 0;
+    const checkInterval = 100; // Check every 100ms
+    
+    context?.logger?.info(`🔴 Recording (speak now, will stop on silence)...`);
+    
+    // Configure recording with silence detection
     const recording = record.record({
       sampleRate: 16000,
       channels: 1,
       audioType: 'wav',
       recorder: 'sox',
-      silence: '1.0',
-      threshold: '2%',
-      thresholdStart: null,
-      thresholdEnd: null,
+      silence: silenceDuration,      // Duration of silence before stopping
+      threshold: silenceThreshold,   // Volume threshold for silence
+      thresholdStart: null,          // Don't wait for sound to start
+      thresholdEnd: silenceThreshold, // Stop on silence
       keepSilence: true
     });
-
-    const audioStream = recording.stream();
-    const chunks: Buffer[] = [];
-
-    audioStream.on('data', (chunk: Buffer) => {
+    
+    const stream = recording.stream();
+    let hasData = false;
+    
+    stream.on('data', (chunk: Buffer) => {
       chunks.push(chunk);
+      if (chunk.length > 0) {
+        hasData = true;
+      }
     });
-
-    audioStream.on('error', (err: Error) => {
+    
+    stream.on('error', (err: Error) => {
       recording.stop();
       reject(new Error(`Recording error: ${err.message}`));
     });
-
-    // Stop recording after duration
-    setTimeout(() => {
-      recording.stop();
-    }, duration * 1000);
-
-    audioStream.on('end', async () => {
-      try {
+    
+    // Check for minimum duration and timeout
+    const timeoutCheck = setInterval(() => {
+      recordingTime += checkInterval;
+      
+      // Force stop at max duration
+      if (recordingTime >= maxDuration * 1000) {
+        clearInterval(timeoutCheck);
+        recording.stop();
+        context?.logger?.info('Maximum recording duration reached.');
+      }
+      // Check if we have enough data after minimum duration
+      else if (recordingTime >= minDuration * 1000 && hasData) {
+        // Let silence detection handle the stop
+      }
+    }, checkInterval);
+    
+    stream.on('end', () => {
+      clearInterval(timeoutCheck);
+      const audioBuffer = Buffer.concat(chunks);
+      
+      // Check if we got meaningful audio
+      if (audioBuffer.length < 1000) { // Too small, probably just noise
+        context?.logger?.warn('Recording too short, might be just noise.');
+      }
+      
+      context?.logger?.info(`Recording complete (${(recordingTime / 1000).toFixed(1)}s).`);
+      resolve(audioBuffer);
+    });
+    
+    // Also handle sox auto-stopping on silence
+    stream.on('close', () => {
+      clearInterval(timeoutCheck);
+      if (chunks.length > 0) {
         const audioBuffer = Buffer.concat(chunks);
-        await fs.writeFile(audioFile, audioBuffer);
-        
-        context?.logger?.info('Recording complete. Processing with ElevenLabs Scribe API...');
-
-        // Use ElevenLabs Scribe API for transcription
-        const transcription = await transcribeWithElevenLabs(audioBuffer, language, prompt, context);
-
-        // Clean up temp files
-        await fs.rm(tempDir, { recursive: true, force: true });
-
-        resolve(transcription);
-      } catch (error: any) {
-        await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
-        reject(new Error(`Transcription error: ${error.message}`));
+        context?.logger?.info(`Recording stopped on silence detection.`);
+        resolve(audioBuffer);
       }
     });
   });
 }
 
-async function getTextInput(prompt?: string, context?: ToolContext): Promise<string> {
-  if (!context?.registry) {
-    throw new Error('Text input mode requires tool registry context');
-  }
-
-  try {
-    const result = await context.registry.execute('input', {
-      prompt: prompt || 'Please enter your input:',
-      type: 'text'
+/**
+ * Record audio with fixed duration (fallback method)
+ */
+async function recordAudioFixed(duration: number, context?: ToolContext): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    
+    context?.logger?.info(`🔴 Recording for ${duration} seconds...`);
+    
+    const recording = record.record({
+      sampleRate: 16000,
+      channels: 1,
+      audioType: 'wav',
+      recorder: 'sox'
     });
+    
+    const stream = recording.stream();
+    
+    stream.on('data', (chunk: Buffer) => {
+      chunks.push(chunk);
+    });
+    
+    stream.on('error', (err: Error) => {
+      recording.stop();
+      reject(new Error(`Recording error: ${err.message}`));
+    });
+    
+    // Stop after fixed duration
+    setTimeout(() => {
+      recording.stop();
+    }, duration * 1000);
+    
+    stream.on('end', () => {
+      const audioBuffer = Buffer.concat(chunks);
+      context?.logger?.info('Recording complete.');
+      resolve(audioBuffer);
+    });
+  });
+}
 
-    if (result.success && result.output) {
-      return result.output;
-    } else {
-      throw new Error(result.error || 'Failed to get input');
-    }
-  } catch (error: any) {
-    throw new Error(`Text input error: ${error.message}`);
+/**
+ * Transcribe audio using ElevenLabs Scribe API
+ */
+async function transcribeAudio(
+  audioBuffer: Buffer, 
+  apiKey: string, 
+  language: string = 'en', 
+  context?: ToolContext
+): Promise<string> {
+  context?.logger?.info('Transcribing with ElevenLabs Scribe...');
+  
+  // Import form-data dynamically
+  const FormData = (await import('form-data')).default;
+  const form = new FormData();
+  
+  // Add audio file to form
+  form.append('file', audioBuffer, {
+    filename: 'recording.wav',
+    contentType: 'audio/wav'
+  });
+  
+  // Add model and language
+  form.append('model_id', 'scribe_v1');
+  form.append('language_code', language);
+  
+  // Make API request
+  const fetch = (await import('node-fetch')).default;
+  const response = await fetch('https://api.elevenlabs.io/v1/speech-to-text', {
+    method: 'POST',
+    headers: {
+      'xi-api-key': apiKey,
+      ...form.getHeaders()
+    },
+    body: form as any
+  });
+  
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`ElevenLabs API error: ${response.status} - ${error}`);
+  }
+  
+  const result = await response.json() as { text: string };
+  context?.logger?.info(`📝 Transcription: "${result.text}"`);
+  
+  return result.text;
+}
+
+/**
+ * Speak text using TTS
+ */
+async function speakText(text: string, context: ToolContext, apiKey?: string): Promise<void> {
+  if (!context.registry) {
+    context.logger?.warn('TTS not available - no registry context');
+    return;
+  }
+  
+  try {
+    await context.registry.execute('elevenlabs_tts', {
+      action: 'speak',
+      text: text,
+      api_key: apiKey
+    });
+    
+    // Wait a moment after TTS completes
+    await new Promise(resolve => setTimeout(resolve, 300));
+  } catch (error) {
+    context.logger?.warn('Failed to speak via TTS:', error);
   }
 }
 
 /**
- * Voice Input tool - Flexible input abstraction for voice and text
+ * Voice Input Tool
  */
-// Store daemon state globally
-let daemonStarted = false;
-
-// Auto-start background assistant on first execution
-async function ensureAssistantStarted(context: ToolContext) {
-  if (daemonStarted) return;
-  
-  try {
-    const settings = await loadClankerSettings();
-    const assistantSettings = {
-      ...defaultAssistantSettings,
-      ...settings.voiceAssistant
-    };
-    
-    if (assistantSettings.enabled && assistantSettings.autoStart) {
-      if (!VoiceAssistantService.isRunning()) {
-        const service = VoiceAssistantService.getInstance(assistantSettings);
-        await service.startBackgroundListener();
-        context.logger?.info('Voice assistant background listener started');
-        daemonStarted = true;
-      } else {
-        context.logger?.debug('Voice assistant already running');
-        daemonStarted = true;
-      }
-    }
-  } catch (error) {
-    // Log error but don't fail
-    context.logger?.debug('Failed to start voice assistant daemon:', error);
-    daemonStarted = true; // Mark as attempted to avoid retrying
-  }
-}
-
-const voiceInputTool = createTool()
+export default createTool()
   .id('voice_input')
   .name('Voice Input')
-  .description('Flexible input tool supporting both voice (microphone + speech-to-text) and text (system dialogs) modes. Voice mode records audio and transcribes it using ElevenLabs Scribe API. Text mode uses system dialogs. Configurable via ~/.clanker/settings.json.')
+  .description('Advanced voice recording with conversation mode, intelligent silence detection, and TTS integration. Records audio from microphone and transcribes using ElevenLabs Scribe API.')
   .category(ToolCategory.Utility)
   .capabilities(ToolCapability.SystemExecute, ToolCapability.NetworkAccess)
-  .tags('voice', 'input', 'audio', 'speech', 'microphone', 'text', 'dialog', 'transcription', 'jarvis', 'assistant')
-
+  .tags('voice', 'input', 'audio', 'speech', 'microphone', 'transcription', 'stt', 'elevenlabs', 'conversation')
+  
   // Arguments
-  .numberArg('duration', 'Recording duration in seconds for voice mode (max: 30)', {
+  .stringArg('action', 'Action to perform: record, conversation, enable_auto_speak, disable_auto_speak, status', {
     required: false,
-    default: 5
+    default: 'record',
+    enum: ['record', 'conversation', 'enable_auto_speak', 'disable_auto_speak', 'status']
   })
-  .stringArg('language', 'Language code for speech recognition (e.g., en-US, es-ES)', {
-    required: false,
-    default: 'en-US'
-  })
-  .stringArg('prompt', 'Optional prompt to guide input (for both voice and text modes)', {
+  .stringArg('prompt', 'Optional prompt to speak before recording', {
     required: false
   })
-  .stringArg('mode', 'Input mode: voice, text, or auto (uses configured default)', {
+  .numberArg('duration', 'Max recording duration in seconds (1-60)', {
     required: false,
-    default: 'auto',
-    enum: ['voice', 'text', 'auto']
+    default: 30
   })
-  .booleanArg('continuous', 'Enable continuous listening mode (voice only)', {
+  .numberArg('min_duration', 'Minimum recording duration before silence detection (1-10)', {
+    required: false,
+    default: 1
+  })
+  .stringArg('language', 'Language code for transcription (e.g., en, es, fr)', {
+    required: false,
+    default: 'en'
+  })
+  .stringArg('api_key', 'ElevenLabs API key (will use saved key if not provided)', {
+    required: false
+  })
+  .booleanArg('speak_prompt', 'If true, speaks the prompt using TTS', {
+    required: false,
+    default: true  // Default to true for better UX
+  })
+  .booleanArg('auto_detect_silence', 'Use intelligent silence detection to stop recording', {
+    required: false,
+    default: true
+  })
+  .booleanArg('speak_response', 'Speak the AI response via TTS (for conversation mode)', {
     required: false,
     default: false
   })
-
+  .stringArg('silence_threshold', 'Volume threshold for silence detection (e.g., 1%, 2%, 5%)', {
+    required: false,
+    default: '2%'
+  })
+  .stringArg('silence_duration', 'Duration of silence before stopping (e.g., 1.5, 2.0)', {
+    required: false,
+    default: '2.0'
+  })
+  
   // Examples
   .examples([
     {
-      description: 'Get voice input with default settings',
+      description: 'Simple voice recording with auto-stop',
       arguments: {
-        mode: 'voice'
+        action: 'record'
       },
-      result: 'Records 5 seconds of audio and returns transcription'
+      result: 'Records until silence detected, returns transcription'
     },
     {
-      description: 'Get text input with custom prompt',
+      description: 'Conversation mode',
       arguments: {
-        mode: 'text',
-        prompt: 'What is your name?'
+        action: 'conversation',
+        prompt: 'Hello! How can I help you today?'
       },
-      result: 'Shows dialog and returns user input'
+      result: 'Starts a voice conversation with TTS prompts and STT responses'
     },
     {
-      description: 'Voice input in Spanish for 10 seconds',
+      description: 'Fixed duration recording',
       arguments: {
-        mode: 'voice',
-        language: 'es-ES',
-        duration: 10,
-        prompt: 'Habla en español'
+        action: 'record',
+        duration: 5,
+        auto_detect_silence: false
       },
-      result: 'Records and transcribes Spanish speech'
+      result: 'Records exactly 5 seconds'
     },
     {
-      description: 'Continuous voice mode',
+      description: 'Voice question with TTS',
       arguments: {
-        mode: 'voice',
-        continuous: true
+        prompt: 'What is your favorite programming language?',
+        speak_prompt: true,
+        speak_response: true
       },
-      result: 'Continuous recording sessions until stopped'
+      result: 'Asks via TTS, records response, speaks back confirmation'
     },
     {
-      description: 'Auto mode (uses settings)',
+      description: 'Enable auto-speak for all responses',
       arguments: {
-        mode: 'auto'
+        action: 'enable_auto_speak'
       },
-      result: 'Uses configured default mode from ~/.clanker/settings.json'
+      result: 'All AI responses will be spoken via TTS'
+    },
+    {
+      description: 'Adjust silence detection sensitivity',
+      arguments: {
+        action: 'record',
+        silence_threshold: '1%',
+        silence_duration: '1.5'
+      },
+      result: 'More sensitive silence detection, stops after 1.5s of silence'
     }
   ])
-
-  // Add daemon control commands
-  .stringArg('daemon', 'Control voice assistant daemon: start, stop, status, ask, devices', {
-    required: false,
-    enum: ['start', 'stop', 'status', 'ask', 'devices']
-  })
-  .stringArg('message', 'Message for ask command', {
-    required: false
-  })
-
-  // Execute
+  
+  // Execute function
   .execute(async (args: ToolArguments, context: ToolContext) => {
-    const { duration = 5, language = 'en-US', prompt, mode = 'auto', continuous = false, daemon, message } = args;
-
-    // Ensure voice assistant is started on first use (backwards compatibility)
-    await ensureAssistantStarted(context);
-
-    // Load settings once at the beginning
-    const settings = await loadClankerSettings();
-    const assistantSettings = {
-      ...defaultAssistantSettings,
-      ...settings.voiceAssistant
-    };
-
-    // Handle daemon control commands
-    if (daemon) {
-      const service = VoiceAssistantService.getInstance(assistantSettings);
-
-      switch (daemon) {
-        case 'start':
-          await service.startBackgroundListener();
-          return {
-            success: true,
-            output: 'Voice assistant background listener started'
-          };
-
-        case 'stop':
-          await service.stop();
-          return {
-            success: true,
-            output: 'Voice assistant stopped'
-          };
-
-        case 'status':
-          const isRunning = VoiceAssistantService.isRunning();
-          return {
-            success: true,
-            output: isRunning ? 'Voice assistant is running' : 'Voice assistant is not running',
-            data: { running: isRunning }
-          };
-
-        case 'ask':
-          if (!message) {
-            return {
-              success: false,
-              error: 'Message required for ask command'
-            };
-          }
-          await service.askUser(message as string);
-          return {
-            success: true,
-            output: `Asked user: ${message}`
-          };
-
-        case 'devices':
-          try {
-            const devices = await getAvailableMicrophoneDevices();
-            return {
-              success: true,
-              output: devices.length > 0 ? `Available microphone devices:\n${devices.join('\n')}` : 'No microphone devices found',
-              data: { devices }
-            };
-          } catch (error: any) {
-            return {
-              success: false,
-              error: `Failed to list devices: ${error.message}`
-            };
-          }
-
-        default:
-          return {
-            success: false,
-            error: `Unknown daemon command: ${daemon}`
-          };
-      }
-    }
-
-    // Use settings loaded at the beginning
-    const inputConfig = settings.input || { mode: 'voice' };
-
-    // Determine input mode
-    let inputMode: 'voice' | 'text' = 'voice';
-    if (mode === 'auto') {
-      inputMode = inputConfig.mode || 'voice';
-    } else if (mode === 'voice' || mode === 'text') {
-      inputMode = mode;
-    } else {
-      return {
-        success: false,
-        error: `Invalid mode: ${mode}. Use 'voice', 'text', or 'auto'.`
-      };
-    }
-
-    // Apply settings for voice mode
-    const voiceDuration = mode === 'auto' && inputConfig.voiceSettings?.duration 
-      ? Math.min(inputConfig.voiceSettings.duration, 30) 
-      : Math.min(duration as number, 30);
+    const { 
+      action = 'record',
+      prompt, 
+      duration = 30,
+      min_duration = 1,
+      language = 'en',
+      api_key,
+      speak_prompt = true,
+      auto_detect_silence = true,
+      speak_response = false,
+      silence_threshold = '2%',
+      silence_duration = '2.0'
+    } = args;
     
-    const voiceLanguage = mode === 'auto' && inputConfig.voiceSettings?.language 
-      ? inputConfig.voiceSettings.language 
-      : language as string;
-
-    context.logger?.info(`Using ${inputMode} input mode`);
-
-    // Handle text input mode
-    if (inputMode === 'text') {
-      if (continuous) {
-        return {
-          success: false,
-          error: 'Continuous mode is not supported for text input.'
-        };
-      }
-
-      try {
-        const text = await getTextInput(prompt as string | undefined, context);
+    // Handle control actions
+    switch (action) {
+      case 'enable_auto_speak':
+        autoSpeak = true;
+        await saveToolSettings({ autoSpeak: true });
         return {
           success: true,
-          output: text,
+          output: 'Auto-speak enabled. All responses will be spoken via TTS.'
+        };
+        
+      case 'disable_auto_speak':
+        autoSpeak = false;
+        await saveToolSettings({ autoSpeak: false });
+        return {
+          success: true,
+          output: 'Auto-speak disabled.'
+        };
+        
+      case 'status':
+        const settings = await loadToolSettings();
+        return {
+          success: true,
+          output: `Voice Input Status:\n` +
+                  `- Conversation Mode: ${conversationMode ? 'Active' : 'Inactive'}\n` +
+                  `- Auto-Speak: ${autoSpeak || settings?.autoSpeak ? 'Enabled' : 'Disabled'}\n` +
+                  `- API Key: ${settings?.apiKey ? 'Configured' : 'Not configured'}\n` +
+                  `- Default Language: ${settings?.language || 'en'}`
+        };
+    }
+    
+    // Check if SoX is installed
+    const soxInstalled = await checkSoxInstalled();
+    if (!soxInstalled) {
+      return {
+        success: false,
+        error: 'SoX is required for audio recording. Please install it:\n' +
+               '  macOS: brew install sox\n' +
+               '  Linux: sudo apt-get install sox\n' +
+               '  Windows: choco install sox'
+      };
+    }
+    
+    // Get API key
+    const finalApiKey = api_key || await getApiKey(context);
+    if (!finalApiKey) {
+      return {
+        success: false,
+        error: 'ElevenLabs API key is required. Please provide it or save it in settings.'
+      };
+    }
+    
+    // Load settings for auto-speak
+    const settings = await loadToolSettings();
+    const shouldSpeak = speak_response || autoSpeak || settings?.autoSpeak || false;
+    
+    try {
+      // Handle conversation mode
+      if (action === 'conversation') {
+        conversationMode = true;
+        context.logger?.info('🎙️ Entering conversation mode. Say "goodbye" or "exit" to end.');
+        
+        // Speak initial prompt if provided
+        if (prompt && context.registry) {
+          await speakText(prompt, context, finalApiKey as string);
+        }
+        
+        // Start conversation loop
+        let continueConversation = true;
+        const conversationHistory: Array<{role: string, content: string}> = [];
+        
+        while (continueConversation) {
+          // Record user input
+          const audioBuffer = auto_detect_silence 
+            ? await recordAudioWithSilenceDetection(
+                duration as number,
+                min_duration as number,
+                silence_threshold as string,
+                silence_duration as string,
+                context
+              )
+            : await recordAudioFixed(duration as number, context);
+          
+          // Transcribe
+          const transcription = await transcribeAudio(
+            audioBuffer, 
+            finalApiKey as string, 
+            language as string,
+            context
+          );
+          
+          // Check for exit commands
+          const lowerTranscription = transcription.toLowerCase();
+          if (lowerTranscription.includes('goodbye') || 
+              lowerTranscription.includes('exit') || 
+              lowerTranscription.includes('stop')) {
+            context.logger?.info('Ending conversation mode.');
+            if (context.registry) {
+              await speakText('Goodbye! Ending conversation mode.', context, finalApiKey as string);
+            }
+            continueConversation = false;
+            break;
+          }
+          
+          // Add to conversation history
+          conversationHistory.push({ role: 'user', content: transcription });
+          
+          // In real implementation, this would process the input and generate a response
+          // For now, we'll just acknowledge the input
+          const response = `I heard you say: "${transcription}". Please continue or say goodbye to exit.`;
+          conversationHistory.push({ role: 'assistant', content: response });
+          
+          // Speak the response
+          if (context.registry) {
+            await speakText(response, context, finalApiKey as string);
+          }
+        }
+        
+        conversationMode = false;
+        return {
+          success: true,
+          output: 'Conversation ended.',
           data: {
-            mode: 'text',
-            input: text
+            conversationHistory,
+            duration: conversationHistory.length
           }
         };
-      } catch (error: any) {
-        return {
-          success: false,
-          error: error.message
-        };
       }
-    }
-
-    // Voice input mode
-    try {
-      await checkSoxInstalled();
+      
+      // Regular recording mode
+      // Speak prompt if requested
+      if (prompt && speak_prompt && context.registry) {
+        await speakText(prompt, context, finalApiKey as string);
+      } else if (prompt && !speak_prompt) {
+        context.logger?.info(`📝 ${prompt}`);
+      }
+      
+      // Record audio
+      const audioBuffer = auto_detect_silence 
+        ? await recordAudioWithSilenceDetection(
+            duration as number,
+            min_duration as number,
+            silence_threshold as string,
+            silence_duration as string,
+            context
+          )
+        : await recordAudioFixed(duration as number, context);
+      
+      // Transcribe audio
+      const transcription = await transcribeAudio(
+        audioBuffer, 
+        finalApiKey as string, 
+        language as string,
+        context
+      );
+      
+      // Optionally speak the transcription back
+      if (shouldSpeak && context.registry) {
+        const confirmationMessage = `I heard: ${transcription}`;
+        await speakText(confirmationMessage, context, finalApiKey as string);
+      }
+      
+      return {
+        success: true,
+        output: transcription,
+        data: {
+          transcription,
+          language,
+          autoDetectedSilence: auto_detect_silence,
+          spokeFeedback: shouldSpeak
+        }
+      };
+      
     } catch (error: any) {
       return {
         success: false,
         error: error.message
       };
     }
-
-    if (continuous) {
-      context.logger?.info('Continuous voice listening mode enabled. Use Ctrl+C to stop.');
-      const results: string[] = [];
-      
-      // Note: In a real tool context, continuous mode would need special handling
-      // For now, we'll just do a single recording and note the limitation
-      context.logger?.warn('Note: Continuous mode in tool context performs single recording');
-      
-      try {
-        context.logger?.info(`Starting voice recording for ${voiceDuration} seconds...`);
-        context.logger?.info('Speak now...');
-        
-        const text = await recordVoice(voiceDuration, voiceLanguage, prompt as string | undefined, context);
-        results.push(text);
-        
-        return {
-          success: true,
-          output: text,
-          data: {
-            mode: 'continuous-voice',
-            transcriptions: results,
-            count: results.length
-          }
-        };
-      } catch (error: any) {
-        return {
-          success: false,
-          error: error.message
-        };
-      }
-    } else {
-      try {
-        context.logger?.info(`Starting voice recording for ${voiceDuration} seconds...`);
-        context.logger?.info('Speak now...');
-        
-        const text = await recordVoice(voiceDuration, voiceLanguage, prompt as string | undefined, context);
-        
-        return {
-          success: true,
-          output: text,
-          data: {
-            mode: 'voice',
-            transcription: text,
-            duration: voiceDuration,
-            language: voiceLanguage
-          }
-        };
-      } catch (error: any) {
-        return {
-          success: false,
-          error: error.message
-        };
-      }
-    }
   })
   .build();
-
-// Export the tool directly
-export default voiceInputTool;
