@@ -1,82 +1,25 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+## [3.2.0] - 2024-01-08
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
-## [3.1.0] - 2025-07-31
+### Changed
+- Switched from Clanker API to ElevenLabs Scribe API for speech-to-text transcription
+- Improved API key management to use shared state from context
+- Disabled auto-start of voice assistant daemon to prevent interference with Clanker
+- Enhanced wake word detection with fuzzy matching for "Hey Clanker"
 
 ### Added
-- **Always-On Voice Assistant**: Integrated voice assistant with wake word detection
-- **Wake Words**: "Hey Jarvis" and "Hey Clanker" activate the assistant
-- **Background Daemon**: Auto-starts when configured in settings
-- **Daemon Commands**: Control the assistant with --daemon start/stop/status/ask
-- **AI Communication**: AI can ask user questions via the ask command
-- **User Preferences**: Configurable user title (default: "sir")
-- **Desktop Notifications**: Visual feedback for all voice interactions
-
-### Changed
-- Tool now auto-starts voice assistant daemon if enabled in settings
-- Added comprehensive voice assistant configuration in ~/.clanker/settings.json
-
-## [3.0.0] - 2025-01-30
-
-### Changed
-- **BREAKING**: Complete rewrite as a proper Clanker tool using createTool() builder pattern
-- **BREAKING**: No longer a CLI tool - must be run via `clanker tools run`
-- **BREAKING**: Changed package name to @ziggle-dev/voice-input
-- Tool now follows standard Clanker tool format and conventions
+- Microphone device selection capability
+- Device listing command (`daemon devices`)
+- Better logging for daemon operations
+- Continuous mode improvements
 
 ### Fixed
-- Proper integration with Clanker tool ecosystem
-- Text mode now uses context.tools.execute() for better integration
-- Removed all CLI-specific code
+- Fixed daemon auto-starting and interfering with normal Clanker operations
+- Improved error handling for API failures
+- Better cleanup of audio processes
 
-## [2.0.0] - 2025-01-30
-
-### Changed
-- **BREAKING**: Removed direct Grok API integration in favor of core Clanker API
-- **BREAKING**: Removed `grokApiKey` parameter - now uses Clanker's configured API
-- Complete rewrite as an input abstraction layer supporting both voice and text modes
-- Now depends on ziggle-dev/input tool for text input functionality
-
-### Added
-- Text input mode using system dialogs (via ziggle-dev/input tool)
-- Mode switching between voice and text input
-- Configuration support via ~/.clanker/settings.json
-- Auto mode that uses configured default
-- Windows installation instructions for SoX
-- Unified output format for both input modes
-
-### Improved
-- Better integration with Clanker ecosystem
-- Centralized API configuration
-- More flexible input handling
-- Enhanced error messages
-
-## [1.0.0] - 2025-01-30
-
-### Added
-- Initial release of clanker-voice-input tool
-- Voice recording capability using system microphone
-- Speech-to-text conversion using Grok's Whisper API
-- Support for multiple languages
-- Configurable recording duration (up to 30 seconds)
-- Continuous listening mode for hands-free operation
-- Optional prompts to guide speech recognition
-- Comprehensive error handling and user feedback
-- Support for environment variable API key configuration
-
-### Features
-- Modern builder pattern implementation using @clanker/tools-runtime
-- TypeScript support with full type definitions
-- Cross-platform audio recording via SoX
-- Automatic temporary file cleanup
-- Detailed logging for debugging
-
-### Documentation
-- Complete README with installation instructions
-- Usage examples for all features
-- Troubleshooting guide
-- Supported language codes reference
+## [3.1.0] - Previous version
+- Initial voice input implementation
+- Voice assistant daemon with wake word detection
+- Text input mode via system dialogs

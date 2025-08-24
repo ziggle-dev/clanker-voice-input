@@ -10,7 +10,7 @@ import { promisify } from 'util';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
-import { callClankerAPI } from './index.js';
+import { transcribeWithElevenLabs } from './index.js';
 
 const execAsync = promisify(exec);
 
@@ -22,16 +22,22 @@ export interface VoiceAssistantSettings {
   autoStart: boolean;
   notificationsEnabled: boolean;
   language: string;
+  microphoneDevice?: string;
+  continuousMode?: boolean;
+  wakeWordTimeout?: number;
 }
 
 export const defaultAssistantSettings: VoiceAssistantSettings = {
   enabled: false,
-  wakeWords: ['hey jarvis', 'hey clanker'],
+  wakeWords: ['hey clanker', 'hey jarvis', 'clanker'],
   userTitle: 'sir',
   sensitivity: 0.5,
-  autoStart: true,
+  autoStart: false,  // Disabled by default to not interfere with clanker
   notificationsEnabled: true,
-  language: 'en-US'
+  language: 'en-US',
+  microphoneDevice: undefined,
+  continuousMode: true,
+  wakeWordTimeout: 3000
 };
 
 export class VoiceAssistantDaemon extends EventEmitter {
@@ -104,8 +110,8 @@ export class VoiceAssistantDaemon extends EventEmitter {
     this.isListening = true;
     this.emit('listening-started');
 
-    // Start continuous recording
-    this.recording = record.record({
+    // Start continuous recording with device configuration
+    const recordOptions: any = {
       sampleRate: 16000,
       channels: 1,
       audioType: 'wav',
@@ -113,7 +119,14 @@ export class VoiceAssistantDaemon extends EventEmitter {
       silence: '1.0',
       threshold: '2%',
       keepSilence: true
-    });
+    };
+
+    // Add microphone device if configured
+    if (this.settings.microphoneDevice) {
+      recordOptions.device = this.settings.microphoneDevice;
+    }
+
+    this.recording = record.record(recordOptions);
 
     const audioStream = this.recording.stream();
     const wakeWordDetector = this.createWakeWordDetector();
@@ -145,10 +158,11 @@ export class VoiceAssistantDaemon extends EventEmitter {
   }
 
   private createWakeWordDetector(): Transform {
-    const CHUNK_DURATION = 3000; // 3 seconds
+    const CHUNK_DURATION = 2000; // 2 seconds for faster wake word detection
     const SAMPLE_RATE = 16000;
     const BYTES_PER_SAMPLE = 2;
     const CHUNK_SIZE = SAMPLE_RATE * BYTES_PER_SAMPLE * (CHUNK_DURATION / 1000);
+    const MAX_BUFFER_SIZE = CHUNK_SIZE * 3; // Keep max 6 seconds of audio
 
     let buffer = Buffer.alloc(0);
 
@@ -160,8 +174,13 @@ export class VoiceAssistantDaemon extends EventEmitter {
         }
 
         buffer = Buffer.concat([buffer, chunk]);
+        
+        // Trim buffer if it gets too large
+        if (buffer.length > MAX_BUFFER_SIZE) {
+          buffer = buffer.slice(buffer.length - MAX_BUFFER_SIZE);
+        }
 
-        // Process in 3-second chunks
+        // Process in chunks
         while (buffer.length >= CHUNK_SIZE) {
           const audioChunk = buffer.slice(0, CHUNK_SIZE);
           buffer = buffer.slice(CHUNK_SIZE);
@@ -186,15 +205,46 @@ export class VoiceAssistantDaemon extends EventEmitter {
 
   private async detectWakeWord(audioBuffer: Buffer): Promise<boolean> {
     try {
-      const transcription = await callClankerAPI(audioBuffer, this.settings.language);
-      const lowerText = transcription.toLowerCase();
+      const transcription = await transcribeWithElevenLabs(audioBuffer, this.settings.language);
+      const lowerText = transcription.toLowerCase().trim();
 
-      return this.settings.wakeWords.some(wakeWord => 
-        lowerText.includes(wakeWord.toLowerCase())
-      );
-    } catch {
+      // Check for wake words with fuzzy matching
+      return this.settings.wakeWords.some(wakeWord => {
+        const wakeWordLower = wakeWord.toLowerCase();
+        // Remove punctuation and extra spaces for matching
+        const cleanText = lowerText.replace(/[.,!?]/g, '').replace(/\s+/g, ' ');
+        const cleanWakeWord = wakeWordLower.replace(/\s+/g, ' ');
+        
+        // Direct match
+        if (cleanText.includes(cleanWakeWord)) return true;
+        
+        // Check if it starts with wake word
+        if (cleanText.startsWith(cleanWakeWord)) return true;
+        
+        // Check for close variations (e.g., "hey flanker" -> "hey clanker")
+        if (this.isSimilarPhrase(cleanText, cleanWakeWord)) return true;
+        
+        return false;
+      });
+    } catch (error) {
+      // Log error but don't spam console
+      if (process.env.DEBUG) {
+        console.error('Wake word detection error:', error);
+      }
       return false;
     }
+  }
+  
+  private isSimilarPhrase(text: string, target: string): boolean {
+    // Check for common misrecognitions of "clanker"
+    const clankerVariations = ['flanker', 'clank her', 'clanger', 'clencher', 'clinker'];
+    
+    for (const variation of clankerVariations) {
+      const altTarget = target.replace('clanker', variation);
+      if (text.includes(altTarget)) return true;
+    }
+    
+    return false;
   }
 
   private onWakeWordDetected(): void {
@@ -217,7 +267,7 @@ export class VoiceAssistantDaemon extends EventEmitter {
 
     this.silenceTimeout = setTimeout(() => {
       this.onSilenceDetected();
-    }, 2000); // 2 seconds of silence
+    }, this.settings.wakeWordTimeout || 3000); // Configurable timeout
   }
 
   private async onSilenceDetected(): Promise<void> {
@@ -234,12 +284,24 @@ export class VoiceAssistantDaemon extends EventEmitter {
       const fullAudio = Buffer.concat(this.audioBuffer);
       
       // Transcribe the command
-      const command = await callClankerAPI(fullAudio, this.settings.language);
+      const command = await transcribeWithElevenLabs(fullAudio, this.settings.language);
       
-      this.emit('command-recognized', command);
-
-      // Execute command via Clanker
-      await this.executeCommand(command);
+      // Filter out empty or wake-word-only commands
+      const cleanCommand = command.toLowerCase().trim();
+      const isJustWakeWord = this.settings.wakeWords.some(ww => 
+        cleanCommand === ww.toLowerCase() || 
+        cleanCommand === ww.toLowerCase() + '.' ||
+        cleanCommand === ww.toLowerCase() + '...'
+      );
+      
+      if (!isJustWakeWord && command.trim().length > 0) {
+        this.emit('command-recognized', command);
+        // Execute command via Clanker
+        await this.executeCommand(command);
+      } else {
+        // Just wake word, wait for actual command
+        this.emit('wake-word-only');
+      }
     } catch (error: any) {
       console.error('Command processing error:', error.message);
       this.emit('error', error);

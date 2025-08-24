@@ -24,8 +24,12 @@ async function loadSettings() {
 }
 
 async function run() {
+  // Ensure .clanker directory exists
+  const clankerDir = path.join(os.homedir(), '.clanker');
+  await fs.mkdir(clankerDir, { recursive: true });
+  
   // Set up logging
-  const logFile = path.join(os.homedir(), '.clanker', 'voice-assistant.log');
+  const logFile = path.join(clankerDir, 'voice-assistant.log');
   const logStream = await fs.open(logFile, 'a');
   
   const log = (message: string) => {
@@ -44,37 +48,51 @@ async function run() {
 
   // Setup event handlers
   daemon.on('wake-word-detected', () => {
-    console.log('[DAEMON] Wake word detected');
+    log('[DAEMON] Wake word detected - listening for command...');
   });
 
   daemon.on('command-recognized', (command: string) => {
-    console.log(`[DAEMON] Command: "${command}"`);
+    log(`[DAEMON] Command recognized: "${command}"`);
   });
 
   daemon.on('command-executed', ({ command, output }: any) => {
-    console.log('[DAEMON] Command executed successfully');
+    log('[DAEMON] Command executed successfully');
+    if (output && output.length < 200) {
+      log(`[DAEMON] Output: ${output}`);
+    }
   });
 
   daemon.on('command-error', ({ command, error }: any) => {
-    console.error('[DAEMON] Command error:', error);
+    log(`[DAEMON] Command error: ${error}`);
   });
 
   daemon.on('error', (error: Error) => {
-    console.error('[DAEMON] Error:', error.message);
+    log(`[DAEMON] Error: ${error.message}`);
+  });
+  
+  daemon.on('processing-command', () => {
+    log('[DAEMON] Processing command...');
   });
 
   // Start listening
   await daemon.startListening();
-  console.log('[DAEMON] Voice assistant is listening...');
-  console.log(`[DAEMON] Wake words: ${settings.wakeWords.join(', ')}`);
-  console.log(`[DAEMON] User title: ${settings.userTitle}`);
+  log('[DAEMON] Voice assistant is listening...');
+  log(`[DAEMON] Wake words: ${settings.wakeWords.join(', ')}`);
+  log(`[DAEMON] User title: ${settings.userTitle}`);
+  log(`[DAEMON] Microphone: ${settings.microphoneDevice || 'default'}`);
+  log(`[DAEMON] Continuous mode: ${settings.continuousMode}`);
+  log(`[DAEMON] Wake word timeout: ${settings.wakeWordTimeout}ms`);
 
-  // Keep process alive
-  process.on('SIGTERM', async () => {
-    console.log('[DAEMON] Shutting down...');
+  // Handle shutdown signals
+  const shutdown = async () => {
+    log('[DAEMON] Shutting down...');
     await daemon.stopListening();
+    await logStream.close();
     process.exit(0);
-  });
+  };
+  
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
 
   // Prevent exit
   setInterval(() => {}, 1000);

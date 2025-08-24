@@ -1,9 +1,9 @@
 {
   "name": "@ziggle-dev/voice-input",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "description": "Flexible input abstraction tool for Clanker supporting both voice (microphone) and text input modes",
   "type": "module",
-  "main": "index.js",
+  "main": "src/index.ts",
   "author": {
     "name": "James",
     "email": "james@example.com",
@@ -42,16 +42,15 @@
     "@ziggler/clanker": "*"
   },
   "dependencies": {
-    "@types/node-notifier": "^8.0.5",
     "form-data": "^4.0.0",
     "node-fetch": "^2.7.0",
     "node-notifier": "^10.0.1",
-    "node-record-lpcm16": "^1.0.1",
-    "sox-stream": "^2.0.6"
+    "node-record-lpcm16": "^1.0.1"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "@types/node-fetch": "^2.6.11",
+    "@types/node-notifier": "^8.0.5",
     "@typescript-eslint/eslint-plugin": "^6.0.0",
     "@typescript-eslint/parser": "^6.0.0",
     "@ziggler/clanker": "^0.1.34",
