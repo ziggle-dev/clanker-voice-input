@@ -1,5 +1,11 @@
 # Changelog
 
+## [3.3.1] - 2025-08-25
+
+### Fixed
+- Test submission to verify package.json is properly included in tool distribution
+- Ensures npm dependencies are available at runtime
+
 ## [3.2.1] - 2025-08-25
 
 ### Fixed
