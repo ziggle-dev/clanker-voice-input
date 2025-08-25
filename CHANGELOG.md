@@ -1,5 +1,16 @@
 # Changelog
 
+## [3.5.0] - 2025-08-25
+
+### Changed
+- Final production release with full Clanker 0.5.7 support
+- Verified end-to-end functionality with automatic dependency installation
+- Confirmed package.json is properly distributed with the tool
+
+### Fixed
+- All npm dependencies now install automatically on first use
+- Tool loads successfully without manual intervention
+
 ## [3.4.0] - 2025-08-25
 
 ### Fixed
