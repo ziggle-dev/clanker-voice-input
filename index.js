@@ -10,8 +10,6 @@ import { promisify } from "util";
 import { exec } from "child_process";
 var execAsync = promisify(exec);
 var settingsPath = path.join(os.homedir(), ".clanker", "settings.json");
-var conversationMode = false;
-var autoSpeak = false;
 async function loadToolSettings() {
   try {
     await fs.mkdir(path.dirname(settingsPath), { recursive: true });
@@ -73,7 +71,7 @@ async function checkSoxInstalled() {
     return false;
   }
 }
-async function recordAudioWithSilenceDetection(maxDuration, minDuration = 1, silenceThreshold = "2%", silenceDuration = "2.0", context) {
+async function recordAudioWithSilenceDetection(maxDuration, minDuration = 0.5, silenceThreshold = "3%", silenceDuration = "1.2", context) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let recordingTime = 0;
@@ -85,13 +83,9 @@ async function recordAudioWithSilenceDetection(maxDuration, minDuration = 1, sil
       audioType: "wav",
       recorder: "sox",
       silence: silenceDuration,
-      // Duration of silence before stopping
       threshold: silenceThreshold,
-      // Volume threshold for silence
       thresholdStart: null,
-      // Don't wait for sound to start
       thresholdEnd: silenceThreshold,
-      // Stop on silence
       keepSilence: true
     });
     const stream = recording.stream();
@@ -111,8 +105,7 @@ async function recordAudioWithSilenceDetection(maxDuration, minDuration = 1, sil
       if (recordingTime >= maxDuration * 1e3) {
         clearInterval(timeoutCheck);
         recording.stop();
-        context?.logger?.info("Maximum recording duration reached.");
-      } else if (recordingTime >= minDuration * 1e3 && hasData) {
+        context?.logger?.debug("Maximum recording duration reached.");
       }
     }, checkInterval);
     stream.on("end", () => {
@@ -121,14 +114,14 @@ async function recordAudioWithSilenceDetection(maxDuration, minDuration = 1, sil
       if (audioBuffer.length < 1e3) {
         context?.logger?.warn("Recording too short, might be just noise.");
       }
-      context?.logger?.info(`Recording complete (${(recordingTime / 1e3).toFixed(1)}s).`);
+      context?.logger?.debug(`Recording complete (${(recordingTime / 1e3).toFixed(1)}s).`);
       resolve(audioBuffer);
     });
     stream.on("close", () => {
       clearInterval(timeoutCheck);
       if (chunks.length > 0) {
         const audioBuffer = Buffer.concat(chunks);
-        context?.logger?.info(`Recording stopped on silence detection.`);
+        context?.logger?.debug(`Recording stopped on silence detection.`);
         resolve(audioBuffer);
       }
     });
@@ -205,10 +198,10 @@ async function speakText(text, context, apiKey) {
     context.logger?.warn("Failed to speak via TTS:", error);
   }
 }
-var index_default = createTool().id("voice_input").name("Voice Input").description("Advanced voice recording with conversation mode, intelligent silence detection, and TTS integration. Records audio from microphone and transcribes using ElevenLabs Scribe API.").category(ToolCategory.Utility).capabilities(ToolCapability.SystemExecute, ToolCapability.NetworkAccess).tags("voice", "input", "audio", "speech", "microphone", "transcription", "stt", "elevenlabs", "conversation").stringArg("action", "Action to perform: record, conversation, enable_auto_speak, disable_auto_speak, status", {
+var index_default = createTool().id("voice_input").name("Voice Input").description("Voice recording with intelligent silence detection and TTS integration. Records audio and transcribes using ElevenLabs Scribe API. Perfect for voice-driven interactions.").category(ToolCategory.Utility).capabilities(ToolCapability.SystemExecute, ToolCapability.NetworkAccess).tags("voice", "input", "audio", "speech", "microphone", "transcription", "stt", "elevenlabs").stringArg("action", "Action to perform: record, ask, enable_voice_mode, disable_voice_mode, status", {
   required: false,
   default: "record",
-  enum: ["record", "conversation", "enable_auto_speak", "disable_auto_speak", "status"]
+  enum: ["record", "ask", "enable_voice_mode", "disable_voice_mode", "status"]
 }).stringArg("prompt", "Optional prompt to speak before recording", {
   required: false
 }).numberArg("duration", "Max recording duration in seconds (1-60)", {
@@ -225,11 +218,10 @@ var index_default = createTool().id("voice_input").name("Voice Input").descripti
 }).booleanArg("speak_prompt", "If true, speaks the prompt using TTS", {
   required: false,
   default: true
-  // Default to true for better UX
 }).booleanArg("auto_detect_silence", "Use intelligent silence detection to stop recording", {
   required: false,
   default: true
-}).booleanArg("speak_response", "Speak the AI response via TTS (for conversation mode)", {
+}).booleanArg("speak_response", "Speak the response via TTS", {
   required: false,
   default: false
 }).stringArg("silence_threshold", "Volume threshold for silence detection (e.g., 1%, 2%, 5%)", {
@@ -240,19 +232,26 @@ var index_default = createTool().id("voice_input").name("Voice Input").descripti
   default: "1.2"
 }).examples([
   {
-    description: "Simple voice recording with auto-stop",
+    description: "Simple voice recording",
     arguments: {
       action: "record"
     },
     result: "Records until silence detected, returns transcription"
   },
   {
-    description: "Conversation mode",
+    description: "Ask a question via voice",
     arguments: {
-      action: "conversation",
-      prompt: "Hello! How can I help you today?"
+      action: "ask",
+      prompt: "What would you like to do?"
     },
-    result: "Starts a voice conversation with TTS prompts and STT responses"
+    result: "Speaks prompt via TTS, records response, returns transcription"
+  },
+  {
+    description: "Enable voice mode for all interactions",
+    arguments: {
+      action: "enable_voice_mode"
+    },
+    result: "Enables voice mode - responses will be spoken via TTS"
   },
   {
     description: "Fixed duration recording",
@@ -264,29 +263,13 @@ var index_default = createTool().id("voice_input").name("Voice Input").descripti
     result: "Records exactly 5 seconds"
   },
   {
-    description: "Voice question with TTS",
-    arguments: {
-      prompt: "What is your favorite programming language?",
-      speak_prompt: true,
-      speak_response: true
-    },
-    result: "Asks via TTS, records response, speaks back confirmation"
-  },
-  {
-    description: "Enable auto-speak for all responses",
-    arguments: {
-      action: "enable_auto_speak"
-    },
-    result: "All AI responses will be spoken via TTS"
-  },
-  {
     description: "Adjust silence detection sensitivity",
     arguments: {
       action: "record",
       silence_threshold: "1%",
-      silence_duration: "1.5"
+      silence_duration: "1.0"
     },
-    result: "More sensitive silence detection, stops after 1.5s of silence"
+    result: "More sensitive silence detection"
   }
 ]).execute(async (args, context) => {
   const {
@@ -303,27 +286,24 @@ var index_default = createTool().id("voice_input").name("Voice Input").descripti
     silence_duration = "1.2"
   } = args;
   switch (action) {
-    case "enable_auto_speak":
-      autoSpeak = true;
+    case "enable_voice_mode":
       await saveToolSettings({ autoSpeak: true });
       return {
         success: true,
-        output: "Auto-speak enabled. All responses will be spoken via TTS."
+        output: "Voice mode enabled. Responses will be spoken via TTS."
       };
-    case "disable_auto_speak":
-      autoSpeak = false;
+    case "disable_voice_mode":
       await saveToolSettings({ autoSpeak: false });
       return {
         success: true,
-        output: "Auto-speak disabled."
+        output: "Voice mode disabled."
       };
     case "status":
       const settings2 = await loadToolSettings();
       return {
         success: true,
         output: `Voice Input Status:
-- Conversation Mode: ${conversationMode ? "Active" : "Inactive"}
-- Auto-Speak: ${autoSpeak || settings2?.autoSpeak ? "Enabled" : "Disabled"}
+- Voice Mode: ${settings2?.autoSpeak ? "Enabled" : "Disabled"}
 - API Key: ${settings2?.apiKey ? "Configured" : "Not configured"}
 - Default Language: ${settings2?.language || "en"}`
       };
@@ -342,53 +322,35 @@ var index_default = createTool().id("voice_input").name("Voice Input").descripti
       error: "ElevenLabs API key is required. Please provide it or save it in settings."
     };
   }
-  const settings = action === "conversation" ? await loadToolSettings() : null;
+  const settings = await loadToolSettings();
+  const voiceModeEnabled = speak_response || settings?.autoSpeak || false;
   try {
-    if (action === "conversation") {
-      conversationMode = true;
-      context.logger?.info('\u{1F399}\uFE0F Entering conversation mode. Say "goodbye" or "exit" to end.');
-      if (prompt && context.registry) {
+    if (action === "ask") {
+      if (prompt && speak_prompt && context.registry) {
         await speakText(prompt, context, finalApiKey);
+      } else if (prompt) {
+        context.logger?.info(`\u{1F4DD} ${prompt}`);
       }
-      let continueConversation = true;
-      const conversationHistory = [];
-      while (continueConversation) {
-        const audioBuffer2 = auto_detect_silence ? await recordAudioWithSilenceDetection(
-          duration,
-          min_duration,
-          silence_threshold,
-          silence_duration,
-          context
-        ) : await recordAudioFixed(duration, context);
-        const transcription2 = await transcribeAudio(
-          audioBuffer2,
-          finalApiKey,
-          language,
-          context
-        );
-        const lowerTranscription = transcription2.toLowerCase();
-        if (lowerTranscription.includes("goodbye") || lowerTranscription.includes("exit") || lowerTranscription.includes("stop")) {
-          context.logger?.info("Ending conversation mode.");
-          if (context.registry) {
-            await speakText("Goodbye! Ending conversation mode.", context, finalApiKey);
-          }
-          continueConversation = false;
-          break;
-        }
-        conversationHistory.push({ role: "user", content: transcription2 });
-        const response = `I heard you say: "${transcription2}". Please continue or say goodbye to exit.`;
-        conversationHistory.push({ role: "assistant", content: response });
-        if (context.registry) {
-          await speakText(response, context, finalApiKey);
-        }
-      }
-      conversationMode = false;
+      const audioBuffer2 = auto_detect_silence ? await recordAudioWithSilenceDetection(
+        duration,
+        min_duration,
+        silence_threshold,
+        silence_duration,
+        context
+      ) : await recordAudioFixed(duration, context);
+      const transcription2 = await transcribeAudio(
+        audioBuffer2,
+        finalApiKey,
+        language,
+        context
+      );
       return {
         success: true,
-        output: "Conversation ended.",
+        output: transcription2,
         data: {
-          conversationHistory,
-          duration: conversationHistory.length
+          transcription: transcription2,
+          language,
+          promptSpoken: speak_prompt && !!prompt
         }
       };
     }
@@ -416,6 +378,7 @@ var index_default = createTool().id("voice_input").name("Voice Input").descripti
       data: {
         transcription,
         language,
+        voiceModeEnabled,
         autoDetectedSilence: auto_detect_silence
       }
     };
