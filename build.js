@@ -12,7 +12,10 @@ const buildConfig = {
   sourcemap: false,
   minify: false,
   external: [
-    '@ziggler/clanker'
+    '@ziggler/clanker',
+    'node-record-lpcm16',
+    'node-fetch',
+    'form-data'
   ],
   banner: {
     js: '// Voice Input Tool for Clanker'
