@@ -1,5 +1,11 @@
 # Changelog
 
+## [3.3.3] - 2025-08-25
+
+### Fixed
+- Debug submission to troubleshoot package.json distribution
+- Added workflow debugging to identify copy issue
+
 ## [3.3.2] - 2025-08-25
 
 ### Fixed
