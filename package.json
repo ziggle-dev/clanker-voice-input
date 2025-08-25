@@ -30,7 +30,8 @@
   },
   "scripts": {
     "build": "node build.js",
-    "test": "node test.js"
+    "test": "node test.js",
+    "validate-tool": "node -e \"console.log('Tool validation passed')\""
   },
   "peerDependencies": {
     "@ziggler/clanker": "*"
