@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.4.0] - 2025-08-25
+
+### Fixed
+- Successfully fixed package.json distribution with tools
+- Tools with npm dependencies now properly include package.json
+- Fixed .gitignore to not exclude package.json in tools directory
+
 ## [3.3.3] - 2025-08-25
 
 ### Fixed
