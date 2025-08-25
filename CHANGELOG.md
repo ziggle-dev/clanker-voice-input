@@ -1,5 +1,15 @@
 # Changelog
 
+## [3.2.1] - 2025-08-25
+
+### Fixed
+- Reverted bundling strategy to keep dependencies external for proper npm installation
+- Optimized build process for better compatibility with Clanker's module loading system
+
+### Technical
+- Dependencies are now properly marked as external in the build process
+- Maintains smaller bundle size by not including node_modules in the output
+
 ## [3.2.0] - 2024-01-08
 
 ### Changed
