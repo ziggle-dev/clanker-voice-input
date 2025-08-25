@@ -1,6 +1,6 @@
 {
   "name": "@ziggle-dev/voice-input",
-  "version": "3.3.1",
+  "version": "3.3.2",
   "description": "Voice input tool for Clanker - Record audio and transcribe using ElevenLabs Scribe API",
   "type": "module",
   "main": "index.js",

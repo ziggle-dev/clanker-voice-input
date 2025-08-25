@@ -1,5 +1,11 @@
 # Changelog
 
+## [3.3.2] - 2025-08-25
+
+### Fixed
+- Re-submission after workflow fix to ensure package.json is included
+- Verifies npm dependencies are properly distributed with the tool
+
 ## [3.3.1] - 2025-08-25
 
 ### Fixed
